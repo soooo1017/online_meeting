@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>미팅 중 - 같이 모여</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- 카메라/마이크 권한 요청, 방 확인 중 -->
+  <div id="state-loading" class="center-state">
+    <div class="spinner"></div>
+    <p id="loading-text">캠/마이크 권한을 요청하고 있어요...</p>
+  </div>
+
+  <!-- 방을 찾을 수 없을 때 -->
+  <div id="state-error" class="center-state hidden">
+    <p id="error-text" style="color: var(--danger); font-size: 1rem"></p>
+    <a href="index.html" class="btn btn-secondary">처음으로 돌아가기</a>
+  </div>
+
+  <!-- 실제 미팅 화면 -->
+  <div id="state-room" class="hidden" style="display: none; flex-direction: column; flex: 1">
+    <div class="room-header">
+      <strong id="room-name-label">미팅</strong>
+      <div class="room-info">
+        <span>초대코드</span>
+        <span class="room-code-chip" id="room-code-label"></span>
+        <button class="copy-btn" id="btn-copy-code">코드 복사</button>
+        <button class="copy-btn" id="btn-copy-link">링크 복사</button>
+      </div>
+    </div>
+
+    <div class="video-grid" id="video-grid"></div>
+
+    <div class="controls">
+      <button class="icon-btn" id="btn-toggle-mic" title="마이크 켜기/끄기">🎤</button>
+      <button class="icon-btn" id="btn-toggle-cam" title="캠 켜기/끄기">📷</button>
+      <button class="icon-btn leave" id="btn-leave">나가기</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabaseClient.js"></script>
+  <script src="js/room.js"></script>
+</body>
+</html>

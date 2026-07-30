@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>같이 모여 - 온라인 미팅</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="landing-wrap">
+    <!-- 초기 화면 -->
+    <div id="view-landing" class="card view">
+      <h1>같이 모여</h1>
+      <p class="sub">시간 제한 없이, 친구들끼리 캠/마이크로 모이는 공간</p>
+      <div class="big-actions">
+        <button id="btn-start" class="btn btn-primary">온라인 미팅 시작하기</button>
+        <button id="btn-join" class="btn btn-secondary">참여하기</button>
+      </div>
+    </div>
+
+    <!-- 미팅 시작하기 화면 -->
+    <div id="view-create" class="card view hidden">
+      <h1>미팅 시작하기</h1>
+      <p class="sub">방 이름을 정하면 초대 링크와 코드가 발급돼요.</p>
+      <form id="form-create">
+        <label for="input-room-name">방 이름</label>
+        <input
+          id="input-room-name"
+          type="text"
+          maxlength="30"
+          placeholder="예: 토요일 스터디"
+          autocomplete="off"
+        />
+        <div class="form-actions">
+          <button type="button" class="btn btn-text btn-back">뒤로</button>
+          <button type="submit" class="btn btn-primary">미팅 만들기</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 참여하기 화면 -->
+    <div id="view-join" class="card view hidden">
+      <h1>참여하기</h1>
+      <p class="sub">받은 초대코드를 입력하세요. (링크로 들어왔다면 자동 입력돼요)</p>
+      <form id="form-join">
+        <label for="input-code">초대코드</label>
+        <input
+          id="input-code"
+          type="text"
+          maxlength="6"
+          placeholder="예: FX92KD"
+          autocomplete="off"
+          style="text-transform: uppercase; letter-spacing: 0.1em"
+        />
+        <div class="error-text" id="join-error"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-text btn-back">뒤로</button>
+          <button type="submit" class="btn btn-primary">참여하기</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
