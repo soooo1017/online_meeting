@@ -13,10 +13,13 @@
     <p id="loading-text">캠/마이크 권한을 요청하고 있어요...</p>
   </div>
 
-  <!-- 방을 찾을 수 없을 때 -->
+  <!-- 방을 찾을 수 없거나 캠/마이크 권한 문제일 때 -->
   <div id="state-error" class="center-state hidden">
-    <p id="error-text" style="color: var(--danger); font-size: 1rem"></p>
-    <a href="index.html" class="btn btn-secondary">처음으로 돌아가기</a>
+    <p id="error-text" style="color: var(--danger); font-size: 1rem; max-width: 420px"></p>
+    <div class="form-actions" style="max-width: 320px">
+      <button id="btn-retry" class="btn btn-secondary">다시 시도</button>
+      <a href="index.html" class="btn btn-text">처음으로 돌아가기</a>
+    </div>
   </div>
 
   <!-- 실제 미팅 화면 -->
