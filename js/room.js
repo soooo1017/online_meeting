@@ -251,18 +251,20 @@ async function init() {
       if (status !== "SUBSCRIBED") return;
       await channel.track({ joinedAt: Date.now() });
 
-      if (!isHost) {
-        setTimeout(() => {
-          const state = channel.presenceState();
-          const others = Object.keys(state).filter((key) => key !== clientId);
-          if (others.length === 0) {
-            leavePeersOnly();
-            showError("방을 찾을 수 없어요.\n코드를 다시 확인하거나, 방이 이미 종료되지 않았는지 확인해주세요.");
-          } else {
-            others.forEach((peerId) => connectToPeer(peerId));
-          }
-        }, JOIN_CHECK_DELAY_MS);
-      }
+      // 이미 들어와있는 사람이 있으면 host 여부와 상관없이 항상 먼저 연결을 시도한다.
+      // (예: 방을 만든 사람이 재접속하는 경우에도 기존 참가자와 반드시 연결돼야 함)
+      // "아무도 없다 = 에러"는 코드로 참여하는 사람에게만 적용한다.
+      // host는 방금 막 만든 빈 방일 수 있으므로 혼자인 게 정상이다.
+      setTimeout(() => {
+        const state = channel.presenceState();
+        const others = Object.keys(state).filter((key) => key !== clientId);
+        if (others.length === 0 && !isHost) {
+          leavePeersOnly();
+          showError("방을 찾을 수 없어요.\n코드를 다시 확인하거나, 방이 이미 종료되지 않았는지 확인해주세요.");
+          return;
+        }
+        others.forEach((peerId) => connectToPeer(peerId));
+      }, JOIN_CHECK_DELAY_MS);
     });
 }
 
