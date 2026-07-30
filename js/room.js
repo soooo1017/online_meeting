@@ -10,9 +10,14 @@ const clientId = crypto.randomUUID();
 const peers = new Map(); // peerId -> { pc: RTCPeerConnection }
 
 let localStream = null;
+let localScreenStream = null;
 let channel = null;
 let micOn = true;
 let camOn = true;
+let isSharingScreen = false;
+let sharingPeerId = null; // 지금 화면 공유 중인 사람의 clientId (없으면 null)
+
+const screenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 
 const el = {
   loading: document.getElementById("state-loading"),
@@ -21,12 +26,15 @@ const el = {
   errorText: document.getElementById("error-text"),
   room: document.getElementById("state-room"),
   videoGrid: document.getElementById("video-grid"),
+  tileRow: document.getElementById("tile-row"),
+  mainStage: document.getElementById("main-stage"),
   roomNameLabel: document.getElementById("room-name-label"),
   roomCodeLabel: document.getElementById("room-code-label"),
   btnCopyCode: document.getElementById("btn-copy-code"),
   btnCopyLink: document.getElementById("btn-copy-link"),
   btnToggleMic: document.getElementById("btn-toggle-mic"),
   btnToggleCam: document.getElementById("btn-toggle-cam"),
+  btnScreenShare: document.getElementById("btn-screen-share"),
   btnLeave: document.getElementById("btn-leave"),
   btnRetry: document.getElementById("btn-retry"),
 };
@@ -79,7 +87,7 @@ function addVideoTile(peerId, stream, { local }) {
     tag.textContent = local ? "나" : "참가자";
     tile.appendChild(video);
     tile.appendChild(tag);
-    el.videoGrid.appendChild(tile);
+    el.tileRow.appendChild(tile);
   }
   tile.querySelector("video").srcObject = stream;
 }
@@ -87,6 +95,120 @@ function addVideoTile(peerId, stream, { local }) {
 function removeVideoTile(peerId) {
   const tile = document.getElementById(videoTileId(peerId));
   if (tile) tile.remove();
+}
+
+// 화면 공유 중인 사람의 타일은 메인 스테이지로, 아니면 다시 작은 줄로 되돌린다.
+function updateLayout() {
+  Array.from(el.mainStage.querySelectorAll(".video-tile")).forEach((tile) => {
+    tile.classList.remove("is-main");
+    el.tileRow.appendChild(tile);
+  });
+  hideLocalScreenPreview();
+
+  const active = !!sharingPeerId;
+  el.videoGrid.classList.toggle("spotlight-active", active);
+  el.mainStage.classList.toggle("hidden", !active);
+
+  if (!active) return;
+
+  if (sharingPeerId === clientId) {
+    showLocalScreenPreview();
+  } else {
+    const tile = document.getElementById(videoTileId(sharingPeerId));
+    if (tile) {
+      tile.classList.add("is-main");
+      el.mainStage.appendChild(tile);
+    }
+  }
+}
+
+function showLocalScreenPreview() {
+  let video = document.getElementById("local-screen-video");
+  if (!video) {
+    video = document.createElement("video");
+    video.id = "local-screen-video";
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+    el.mainStage.appendChild(video);
+  }
+  video.srcObject = localScreenStream;
+}
+
+function hideLocalScreenPreview() {
+  const video = document.getElementById("local-screen-video");
+  if (video) video.remove();
+}
+
+// Presence에 기록된 sharing 플래그를 보고 "지금 화면 공유 중인 사람"을 다시 계산한다.
+// 여러 명이 동시에 sharing:true인 순간(막 전환되는 찰나)이 있을 수 있어서,
+// 목록 순서가 아니라 sharingSince(공유 시작 시각)가 가장 최근인 사람을 우승자로 뽑는다.
+function recomputeSharer() {
+  if (!channel) return;
+  const state = channel.presenceState();
+  let sharer = null;
+  let latestSince = -Infinity;
+  for (const key of Object.keys(state)) {
+    const meta = state[key].find((m) => m.sharing);
+    if (meta && (meta.sharingSince ?? 0) > latestSince) {
+      latestSince = meta.sharingSince ?? 0;
+      sharer = key;
+    }
+  }
+
+  // 내가 공유 중인데 다른 사람이 새로 공유를 시작했으면 내 공유는 자동으로 내려간다.
+  if (isSharingScreen && sharer !== clientId) {
+    stopScreenShare();
+    return; // stopScreenShare가 다시 recomputeSharer를 트리거함
+  }
+
+  sharingPeerId = sharer;
+  updateLayout();
+}
+
+async function startScreenShare() {
+  if (!screenShareSupported || isSharingScreen) return;
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+  } catch (err) {
+    return; // 사용자가 선택 창에서 취소한 경우
+  }
+
+  localScreenStream = stream;
+  const screenTrack = stream.getVideoTracks()[0];
+  screenTrack.onended = () => stopScreenShare();
+
+  peers.forEach(({ pc }) => {
+    const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+    if (sender) sender.replaceTrack(screenTrack);
+  });
+
+  isSharingScreen = true;
+  el.btnScreenShare.classList.add("active");
+  await channel.track({ joinedAt: Date.now(), sharing: true, sharingSince: Date.now() });
+  recomputeSharer();
+}
+
+async function stopScreenShare() {
+  if (!isSharingScreen) return;
+  isSharingScreen = false;
+  el.btnScreenShare.classList.remove("active");
+
+  if (localScreenStream) {
+    localScreenStream.getTracks().forEach((track) => track.stop());
+    localScreenStream = null;
+  }
+
+  const camTrack = localStream.getVideoTracks()[0];
+  peers.forEach(({ pc }) => {
+    const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+    if (sender && camTrack) sender.replaceTrack(camTrack);
+  });
+
+  if (channel) await channel.track({ joinedAt: Date.now(), sharing: false });
+  recomputeSharer();
 }
 
 function sendSignal(to, data) {
@@ -171,6 +293,7 @@ function removePeer(peerId) {
 async function leaveRoom() {
   peers.forEach((_, peerId) => removePeer(peerId));
   if (localStream) localStream.getTracks().forEach((track) => track.stop());
+  if (localScreenStream) localScreenStream.getTracks().forEach((track) => track.stop());
   if (channel) {
     await channel.untrack();
     await supabaseClient.removeChannel(channel);
@@ -192,6 +315,19 @@ function setupControls() {
     el.btnToggleCam.classList.toggle("off", !camOn);
     el.btnToggleCam.textContent = camOn ? "📷" : "🚫";
   });
+
+  if (screenShareSupported) {
+    el.btnScreenShare.addEventListener("click", () => {
+      if (isSharingScreen) {
+        stopScreenShare();
+      } else {
+        startScreenShare();
+      }
+    });
+  } else {
+    el.btnScreenShare.disabled = true;
+    el.btnScreenShare.title = "이 브라우저에서는 화면 공유를 지원하지 않아요";
+  }
 
   el.btnLeave.addEventListener("click", leaveRoom);
 
@@ -243,13 +379,17 @@ async function init() {
     })
     .on("presence", { event: "leave" }, ({ key }) => {
       removePeer(key);
+      recomputeSharer();
+    })
+    .on("presence", { event: "sync" }, () => {
+      recomputeSharer();
     })
     .on("broadcast", { event: "signal" }, ({ payload }) => {
       if (payload.to === clientId) handleSignal(payload);
     })
     .subscribe(async (status) => {
       if (status !== "SUBSCRIBED") return;
-      await channel.track({ joinedAt: Date.now() });
+      await channel.track({ joinedAt: Date.now(), sharing: false });
 
       // 이미 들어와있는 사람이 있으면 host 여부와 상관없이 항상 먼저 연결을 시도한다.
       // (예: 방을 만든 사람이 재접속하는 경우에도 기존 참가자와 반드시 연결돼야 함)
