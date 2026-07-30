@@ -37,15 +37,15 @@ function mediaErrorMessage(err) {
   switch (err.name) {
     case "NotAllowedError":
     case "PermissionDeniedError":
-      return "캠/마이크 접근이 차단되어 있어요. 주소창 왼쪽의 자물쇠(또는 카메라) 아이콘을 눌러 카메라/마이크 권한을 '허용'으로 바꾼 뒤 다시 시도해주세요.";
+      return "캠/마이크 접근이 차단되어 있어요.\n주소창 왼쪽의 자물쇠(또는 카메라) 아이콘을 눌러 카메라/마이크 권한을 '허용'으로 바꾼 뒤 다시 시도해주세요.";
     case "NotFoundError":
     case "DevicesNotFoundError":
-      return "캠 또는 마이크 장치를 찾을 수 없어요. 기기가 제대로 연결되어 있는지 확인해주세요.";
+      return "캠 또는 마이크 장치를 찾을 수 없어요.\n기기가 제대로 연결되어 있는지 확인해주세요.";
     case "NotReadableError":
     case "TrackStartError":
-      return "다른 프로그램이 캠/마이크를 사용 중인 것 같아요. 다른 화상회의 앱을 종료하고 다시 시도해주세요.";
+      return "다른 프로그램이 캠/마이크를 사용 중인 것 같아요.\n다른 화상회의 앱을 종료하고 다시 시도해주세요.";
     default:
-      return "캠/마이크 권한이 필요해요. 브라우저 권한 설정을 확인해주세요.";
+      return "캠/마이크 권한이 필요해요.\n브라우저 권한 설정을 확인해주세요.";
   }
 }
 
@@ -257,7 +257,7 @@ async function init() {
           const others = Object.keys(state).filter((key) => key !== clientId);
           if (others.length === 0) {
             leavePeersOnly();
-            showError("방을 찾을 수 없어요. 코드를 다시 확인하거나, 방이 이미 종료되지 않았는지 확인해주세요.");
+            showError("방을 찾을 수 없어요.\n코드를 다시 확인하거나, 방이 이미 종료되지 않았는지 확인해주세요.");
           } else {
             others.forEach((peerId) => connectToPeer(peerId));
           }

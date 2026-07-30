@@ -288,6 +288,26 @@ input[type="text"]:focus {
   text-align: center;
 }
 
+.error-message {
+  color: var(--danger);
+  font-size: 1rem;
+  max-width: 420px;
+  white-space: pre-line;
+  line-height: 1.5;
+}
+
+.stacked-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 220px;
+}
+
+.stacked-actions .btn {
+  width: 100%;
+}
+
 .spinner {
   width: 32px;
   height: 32px;
