@@ -52,7 +52,7 @@ function mediaErrorMessage(err) {
 function showState(name) {
   el.loading.classList.toggle("hidden", name !== "loading");
   el.error.classList.toggle("hidden", name !== "error");
-  el.room.style.display = name === "room" ? "flex" : "none";
+  el.room.classList.toggle("hidden", name !== "room");
 }
 
 function showError(message) {
