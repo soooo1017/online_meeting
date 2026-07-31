@@ -25,6 +25,8 @@ let chatOpen = false;
 let unreadChatCount = 0;
 let participantsOpen = false;
 let roomStartedAt = Date.now();
+let meetingId = null; // meetings 테이블의 row id (host가 생성, presence로 전파)
+let hasRecordedJoin = false;
 
 const screenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "👏", "🎉"];
@@ -114,6 +116,7 @@ const myPresence = {
   isHost,
   // 방 이름은 만든 사람의 링크에만 담겨있어서, 참여자는 이 값을 host의 Presence로 전달받아야 한다.
   roomName: isHost ? roomName : null,
+  meetingId: null, // meetings 테이블 row id, host가 만든 뒤 채워짐
 };
 
 function trackPresence(patch) {
@@ -470,6 +473,13 @@ async function leaveRoom() {
   detachSpeakingDetector(clientId);
   if (localStream) localStream.getTracks().forEach((track) => track.stop());
   if (localScreenStream) localScreenStream.getTracks().forEach((track) => track.stop());
+  if (meetingId) {
+    try {
+      await supabaseClient.from("meetings").update({ ended_at: new Date().toISOString() }).eq("id", meetingId);
+    } catch (err) {
+      console.error("미팅 기록 종료 시각 저장 실패", err);
+    }
+  }
   if (channel) {
     await channel.untrack();
     await supabaseClient.removeChannel(channel);
@@ -713,6 +723,54 @@ function updateRoomName() {
   el.roomNameLabel.textContent = knownRoomName || "미팅";
 }
 
+// ---- 미팅 기록(이름/시작·종료 시각/참여자) ----
+
+async function createMeetingLog() {
+  try {
+    const { data, error } = await supabaseClient
+      .from("meetings")
+      .insert({ room_name: roomName, room_code: roomCode, participants: [myPresence.nickname] })
+      .select("id")
+      .single();
+    if (error) throw error;
+    meetingId = data.id;
+  } catch (err) {
+    console.error("미팅 기록 생성 실패 (meetings 테이블이 없을 수 있어요)", err);
+  }
+}
+
+async function recordJoinInLog() {
+  try {
+    const { data, error } = await supabaseClient.from("meetings").select("participants").eq("id", meetingId).single();
+    if (error) throw error;
+    const current = data.participants || [];
+    if (current.includes(myPresence.nickname)) return;
+    await supabaseClient
+      .from("meetings")
+      .update({ participants: [...current, myPresence.nickname] })
+      .eq("id", meetingId);
+  } catch (err) {
+    console.error("미팅 기록에 참여자 추가 실패", err);
+  }
+}
+
+// host의 Presence에서 meetingId를 전달받아, 참여자 본인을 기록에 추가한다.
+function updateMeetingId() {
+  if (meetingId || !channel) return;
+  const state = channel.presenceState();
+  for (const key of Object.keys(state)) {
+    const meta = state[key][0];
+    if (meta && meta.isHost && meta.meetingId) {
+      meetingId = meta.meetingId;
+      break;
+    }
+  }
+  if (meetingId && !isHost && !hasRecordedJoin) {
+    hasRecordedJoin = true;
+    recordJoinInLog();
+  }
+}
+
 async function copyToClipboard(text, button, resetLabel) {
   try {
     await navigator.clipboard.writeText(text);
@@ -766,6 +824,7 @@ async function init() {
       recomputeRoomStartedAt();
       renderParticipantList();
       updateRoomName();
+      updateMeetingId();
     })
     .on("broadcast", { event: "chat" }, ({ payload }) => {
       if (payload.from !== clientId) appendChatMessage(payload, { mine: false });
@@ -778,6 +837,10 @@ async function init() {
     })
     .subscribe(async (status) => {
       if (status !== "SUBSCRIBED") return;
+      if (isHost) {
+        await createMeetingLog();
+        myPresence.meetingId = meetingId;
+      }
       await trackPresence({});
       applyPresenceMeta();
       recomputeRoomStartedAt();
