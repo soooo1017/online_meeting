@@ -21,8 +21,11 @@ let sharingPeerId = null; // 지금 화면 공유 중인 사람의 clientId (없
 let handRaised = false;
 let chatOpen = false;
 let unreadChatCount = 0;
+let participantsOpen = false;
+let roomStartedAt = Date.now();
 
 const screenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "👏", "🎉"];
 
 // ---- 발화자(말하는 사람) 감지 ----
 // 파형(time-domain) 데이터의 RMS(실효값)로 음량을 판단한다. 주파수 대역 평균보다
@@ -139,6 +142,14 @@ const el = {
   chatMessages: document.getElementById("chat-messages"),
   chatForm: document.getElementById("chat-form"),
   chatInput: document.getElementById("chat-input"),
+  btnReaction: document.getElementById("btn-reaction"),
+  reactionPicker: document.getElementById("reaction-picker"),
+  btnToggleParticipants: document.getElementById("btn-toggle-participants"),
+  participantsCount: document.getElementById("participants-count"),
+  participantsPanel: document.getElementById("participants-panel"),
+  btnCloseParticipants: document.getElementById("btn-close-participants"),
+  participantsList: document.getElementById("participants-list"),
+  elapsedTime: document.getElementById("elapsed-time"),
 };
 
 el.btnRetry.addEventListener("click", () => location.reload());
@@ -494,6 +505,20 @@ function setupControls() {
     appendChatMessage(message, { mine: true });
     el.chatInput.value = "";
   });
+
+  el.btnToggleParticipants.addEventListener("click", () => (participantsOpen ? closeParticipants() : openParticipants()));
+  el.btnCloseParticipants.addEventListener("click", closeParticipants);
+
+  buildReactionPicker();
+  el.btnReaction.addEventListener("click", (e) => {
+    e.stopPropagation();
+    el.reactionPicker.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!el.reactionPicker.contains(e.target) && e.target !== el.btnReaction) {
+      el.reactionPicker.classList.add("hidden");
+    }
+  });
 }
 
 function peerLabel(id) {
@@ -502,7 +527,106 @@ function peerLabel(id) {
   return (meta && meta.nickname) || defaultLabel(id);
 }
 
+// ---- 리액션 ----
+
+function buildReactionPicker() {
+  REACTION_EMOJIS.forEach((emoji) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = emoji;
+    btn.addEventListener("click", () => {
+      channel.send({ type: "broadcast", event: "reaction", payload: { from: clientId, emoji } });
+      showFloatingReaction(clientId, emoji);
+      el.reactionPicker.classList.add("hidden");
+    });
+    el.reactionPicker.appendChild(btn);
+  });
+}
+
+function showFloatingReaction(peerId, emoji) {
+  const tile = document.getElementById(videoTileId(peerId));
+  if (!tile) return;
+  const span = document.createElement("span");
+  span.className = "floating-reaction";
+  span.textContent = emoji;
+  span.addEventListener("animationend", () => span.remove());
+  tile.appendChild(span);
+}
+
+// ---- 참가자 목록 ----
+
+function openParticipants() {
+  closeChat();
+  participantsOpen = true;
+  el.participantsPanel.classList.add("open");
+  renderParticipantList();
+}
+
+function closeParticipants() {
+  participantsOpen = false;
+  el.participantsPanel.classList.remove("open");
+}
+
+function renderParticipantList() {
+  if (!channel) return;
+  const state = channel.presenceState();
+  const ids = Object.keys(state);
+  el.participantsCount.textContent = String(ids.length);
+
+  el.participantsList.innerHTML = "";
+  ids
+    .slice()
+    .sort((a, b) => (a === clientId ? -1 : b === clientId ? 1 : 0))
+    .forEach((id) => {
+      const meta = state[id][0] || {};
+      const row = document.createElement("div");
+      row.className = "participant-row";
+
+      const name = document.createElement("span");
+      name.textContent = id === clientId ? `나 (${meta.nickname || ""})` : meta.nickname || defaultLabel(id);
+      row.appendChild(name);
+
+      const icons = document.createElement("span");
+      icons.className = "participant-icons";
+      let iconText = "";
+      if (meta.sharing) iconText += "🖥️";
+      if (meta.handRaised) iconText += "✋";
+      if (meta.micOn === false) iconText += "🔇";
+      icons.textContent = iconText;
+      row.appendChild(icons);
+
+      el.participantsList.appendChild(row);
+    });
+}
+
+// ---- 경과 시간 ----
+
+function recomputeRoomStartedAt() {
+  if (!channel) return;
+  const state = channel.presenceState();
+  let earliest = myPresence.joinedAt;
+  for (const key of Object.keys(state)) {
+    const meta = state[key][0];
+    if (meta && meta.joinedAt && meta.joinedAt < earliest) earliest = meta.joinedAt;
+  }
+  roomStartedAt = earliest;
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+function updateElapsedTime() {
+  el.elapsedTime.textContent = formatElapsed(Date.now() - roomStartedAt);
+}
+
 function openChat() {
+  closeParticipants();
   chatOpen = true;
   el.chatPanel.classList.add("open");
   unreadChatCount = 0;
@@ -589,13 +713,20 @@ async function init() {
       removePeer(key);
       peerMeta.delete(key);
       recomputeSharer();
+      recomputeRoomStartedAt();
+      renderParticipantList();
     })
     .on("presence", { event: "sync" }, () => {
       applyPresenceMeta();
       recomputeSharer();
+      recomputeRoomStartedAt();
+      renderParticipantList();
     })
     .on("broadcast", { event: "chat" }, ({ payload }) => {
       if (payload.from !== clientId) appendChatMessage(payload, { mine: false });
+    })
+    .on("broadcast", { event: "reaction" }, ({ payload }) => {
+      if (payload.from !== clientId) showFloatingReaction(payload.from, payload.emoji);
     })
     .on("broadcast", { event: "signal" }, ({ payload }) => {
       if (payload.to === clientId) handleSignal(payload);
@@ -604,6 +735,9 @@ async function init() {
       if (status !== "SUBSCRIBED") return;
       await trackPresence({});
       applyPresenceMeta();
+      recomputeRoomStartedAt();
+      updateElapsedTime();
+      setInterval(updateElapsedTime, 1000);
 
       // 이미 들어와있는 사람이 있으면 host 여부와 상관없이 항상 먼저 연결을 시도한다.
       // (예: 방을 만든 사람이 재접속하는 경우에도 기존 참가자와 반드시 연결돼야 함)

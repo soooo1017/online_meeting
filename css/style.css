@@ -186,6 +186,18 @@ input[type="text"]:focus {
   flex-wrap: wrap;
 }
 
+.room-header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.elapsed-time {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .room-info {
   display: flex;
   align-items: center;
@@ -569,4 +581,86 @@ input[type="text"]:focus {
 
 .chat-form .btn {
   padding: 10px 16px;
+}
+
+/* ---------- 리액션 ---------- */
+
+.reaction-wrap {
+  position: relative;
+}
+
+.reaction-picker {
+  position: absolute;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  padding: 6px;
+}
+
+.reaction-picker button {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+.reaction-picker button:hover {
+  background: var(--surface);
+}
+
+.floating-reaction {
+  position: absolute;
+  left: 50%;
+  bottom: 40%;
+  transform: translateX(-50%);
+  font-size: 2rem;
+  pointer-events: none;
+  animation: float-up 1.6s ease-out forwards;
+  z-index: 5;
+}
+
+@keyframes float-up {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.6);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -10px) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -70px) scale(1);
+  }
+}
+
+/* ---------- 참가자 목록 ---------- */
+
+.participants-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+}
+
+.participant-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.participant-icons {
+  display: flex;
+  gap: 6px;
+  font-size: 0.9rem;
 }

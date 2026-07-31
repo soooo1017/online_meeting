@@ -25,7 +25,10 @@
   <!-- 실제 미팅 화면 -->
   <div id="state-room" class="room-state hidden">
     <div class="room-header">
-      <strong id="room-name-label">미팅</strong>
+      <div class="room-header-title">
+        <strong id="room-name-label">미팅</strong>
+        <span id="elapsed-time" class="elapsed-time">00:00</span>
+      </div>
       <div class="room-info">
         <span>초대코드</span>
         <span class="room-code-chip" id="room-code-label"></span>
@@ -44,6 +47,14 @@
       <button class="icon-btn" id="btn-toggle-cam" title="캠 켜기/끄기">📷</button>
       <button class="icon-btn" id="btn-screen-share" title="화면 공유">🖥️</button>
       <button class="icon-btn" id="btn-raise-hand" title="손 들기">✋</button>
+      <div class="reaction-wrap">
+        <div id="reaction-picker" class="reaction-picker hidden"></div>
+        <button class="icon-btn" id="btn-reaction" title="리액션">😊</button>
+      </div>
+      <button class="icon-btn" id="btn-toggle-participants" title="참가자 목록">
+        👥
+        <span id="participants-count" class="chat-badge">1</span>
+      </button>
       <button class="icon-btn" id="btn-toggle-chat" title="채팅">
         💬
         <span id="chat-badge" class="chat-badge hidden"></span>
@@ -63,6 +74,14 @@
         <input id="chat-input" type="text" maxlength="500" placeholder="메시지 입력..." autocomplete="off" />
         <button type="submit" class="btn btn-primary">전송</button>
       </form>
+    </div>
+
+    <div id="participants-panel" class="chat-panel">
+      <div class="chat-panel-header">
+        <strong>참가자</strong>
+        <button class="copy-btn" id="btn-close-participants">닫기</button>
+      </div>
+      <div id="participants-list" class="participants-list"></div>
     </div>
   </div>
 
