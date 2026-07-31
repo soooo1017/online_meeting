@@ -497,7 +497,9 @@ async function leaveRoom() {
     await channel.untrack();
     await supabaseClient.removeChannel(channel);
   }
-  location.href = "index.html";
+  // href로 이동하면 이 페이지가 히스토리에 남아서, 뒤로가기를 누르면 이미 나간 회의 화면이
+  // (심하면 bfcache에 저장된 예전 상태 그대로) 다시 보인다. replace로 아예 히스토리에서 지운다.
+  location.replace("index.html");
 }
 
 function setupControls() {
@@ -897,6 +899,13 @@ function leavePeersOnly() {
 
 window.addEventListener("beforeunload", () => {
   if (channel) channel.untrack();
+});
+
+// 뒤로/앞으로 가기로 이 페이지가 bfcache에서 그대로(스크립트 재실행 없이) 복원되면
+// 캠/채널이 이미 정리된 상태 그대로 화면만 남아있게 된다. 강제로 새로고침해서
+// 방이 실제로 아직 있는지부터 다시 확인하게 한다.
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) location.reload();
 });
 
 init();
