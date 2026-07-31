@@ -24,6 +24,76 @@ let unreadChatCount = 0;
 
 const screenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 
+// ---- 발화자(말하는 사람) 감지 ----
+// 파형(time-domain) 데이터의 RMS(실효값)로 음량을 판단한다. 주파수 대역 평균보다
+// 목소리처럼 에너지가 넓게 퍼진 신호와 순음처럼 한 주파수에 몰린 신호 모두에 안정적으로 반응한다.
+const SPEAKING_RMS_THRESHOLD = 0.02; // 0~1 스케일, 이 값보다 크면 "말하는 중"으로 판단 (필요하면 조정)
+const SPEAKING_HANGOVER_MS = 400; // 잠깐 조용해져도 이 시간 동안은 계속 "말하는 중"으로 유지 (깜빡임 방지)
+const SPEAKING_CHECK_INTERVAL_MS = 150;
+
+const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+const audioCtx = AudioContextClass ? new AudioContextClass() : null;
+const speakingAnalysers = new Map(); // peerId -> { source, analyser, dataArray }
+const speakingUntil = new Map(); // peerId -> 이 시각까지는 "말하는 중"으로 취급
+
+function attachSpeakingDetector(peerId, stream) {
+  if (!audioCtx || speakingAnalysers.has(peerId)) return;
+  if (stream.getAudioTracks().length === 0) return;
+
+  const source = audioCtx.createMediaStreamSource(stream);
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+
+  speakingAnalysers.set(peerId, { source, analyser, dataArray: new Uint8Array(analyser.fftSize) });
+}
+
+function detachSpeakingDetector(peerId) {
+  const entry = speakingAnalysers.get(peerId);
+  if (entry) {
+    entry.source.disconnect();
+    speakingAnalysers.delete(peerId);
+  }
+  speakingUntil.delete(peerId);
+  setSpeakingClass(peerId, false);
+}
+
+function setSpeakingClass(peerId, isSpeaking) {
+  const tile = document.getElementById(videoTileId(peerId));
+  if (tile) tile.classList.toggle("speaking", isSpeaking);
+}
+
+function speakingDetectionTick() {
+  const now = Date.now();
+  speakingAnalysers.forEach((entry, peerId) => {
+    entry.analyser.getByteTimeDomainData(entry.dataArray);
+    let sumSquares = 0;
+    for (let i = 0; i < entry.dataArray.length; i++) {
+      const normalized = (entry.dataArray[i] - 128) / 128; // -1..1
+      sumSquares += normalized * normalized;
+    }
+    const rms = Math.sqrt(sumSquares / entry.dataArray.length);
+
+    if (rms > SPEAKING_RMS_THRESHOLD) {
+      speakingUntil.set(peerId, now + SPEAKING_HANGOVER_MS);
+    }
+    setSpeakingClass(peerId, (speakingUntil.get(peerId) || 0) > now);
+  });
+}
+
+if (audioCtx) {
+  setInterval(speakingDetectionTick, SPEAKING_CHECK_INTERVAL_MS);
+  // 브라우저 자동재생 정책으로 AudioContext가 suspended 상태로 시작할 수 있어 깨워준다.
+  audioCtx.resume().catch(() => {});
+  document.addEventListener(
+    "click",
+    () => {
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    },
+    { once: true },
+  );
+}
+
 function defaultLabel(id) {
   return "참가자 " + id.slice(0, 4);
 }
@@ -296,6 +366,7 @@ function createPeerConnection(peerId) {
 
   pc.ontrack = (event) => {
     addVideoTile(peerId, event.streams[0], { local: false });
+    attachSpeakingDetector(peerId, event.streams[0]);
   };
 
   pc.onconnectionstatechange = () => {
@@ -353,10 +424,12 @@ function removePeer(peerId) {
   peer.pc.close();
   peers.delete(peerId);
   removeVideoTile(peerId);
+  detachSpeakingDetector(peerId);
 }
 
 async function leaveRoom() {
   peers.forEach((_, peerId) => removePeer(peerId));
+  detachSpeakingDetector(clientId);
   if (localStream) localStream.getTracks().forEach((track) => track.stop());
   if (localScreenStream) localScreenStream.getTracks().forEach((track) => track.stop());
   if (channel) {
@@ -502,6 +575,7 @@ async function init() {
 
   showState("room");
   addVideoTile(clientId, localStream, { local: true });
+  attachSpeakingDetector(clientId, localStream);
 
   channel = supabaseClient.channel(`room-${roomCode}`, {
     config: { presence: { key: clientId } },

@@ -298,6 +298,12 @@ input[type="text"]:focus {
   overflow: hidden;
   aspect-ratio: 4 / 3;
   border: 1px solid var(--border);
+  box-shadow: 0 0 0 0 transparent;
+  transition: box-shadow 0.15s ease;
+}
+
+.video-tile.speaking {
+  box-shadow: 0 0 0 3px #fff;
 }
 
 .video-tile video {
