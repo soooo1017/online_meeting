@@ -199,7 +199,9 @@ function addVideoTile(peerId, stream, { local }) {
     if (local) video.muted = true;
     const tag = document.createElement("div");
     tag.className = "tag";
-    tag.textContent = local ? "나" : defaultLabel(peerId);
+    // presence 정보가 ontrack보다 먼저 도착했을 수도 있으니, 이미 알고 있는 닉네임이 있으면 바로 반영한다.
+    const knownMeta = peerMeta.get(peerId);
+    tag.textContent = local ? "나" : (knownMeta && knownMeta.nickname) || defaultLabel(peerId);
 
     const indicators = document.createElement("div");
     indicators.className = "tile-indicators";
@@ -511,7 +513,8 @@ function setupControls() {
 
   el.btnCopyCode.addEventListener("click", () => copyToClipboard(roomCode, el.btnCopyCode, "코드 복사"));
   el.btnCopyLink.addEventListener("click", () => {
-    const link = new URL(`room.html?code=${roomCode}`, location.href).toString();
+    // room.html로 바로 보내면 닉네임 입력 단계를 건너뛰게 되니, index.html을 거치게 한다.
+    const link = new URL(`index.html?code=${roomCode}`, location.href).toString();
     copyToClipboard(link, el.btnCopyLink, "링크 복사");
   });
 

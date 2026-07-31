@@ -244,11 +244,17 @@ input[type="text"]:focus {
 .tile-row {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-auto-rows: 1fr;
   gap: 12px;
-  align-content: start;
+}
+
+/* 화면 공유 중이 아닐 때는 인원수와 무관하게 화면 안에 다 들어오도록,
+   고정 비율 대신 그리드가 칸 크기를 알아서 채우게 한다. */
+.video-grid:not(.spotlight-active) .tile-row .video-tile {
+  aspect-ratio: auto;
 }
 
 .main-stage {
@@ -271,6 +277,10 @@ input[type="text"]:focus {
   aspect-ratio: auto;
   border: none;
   border-radius: 0;
+}
+
+.main-stage .video-tile.speaking {
+  border: 3px solid #fff;
 }
 
 /* 화면 공유 중: 메인 스테이지는 크게, 나머지 참가자는 작은 줄로 */
@@ -309,13 +319,12 @@ input[type="text"]:focus {
   border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 4 / 3;
-  border: 1px solid var(--border);
-  box-shadow: 0 0 0 0 transparent;
-  transition: box-shadow 0.15s ease;
+  border: 3px solid var(--border);
+  transition: border-color 0.1s ease;
 }
 
 .video-tile.speaking {
-  box-shadow: 0 0 0 3px #fff;
+  border-color: #fff;
 }
 
 .video-tile video {
@@ -618,27 +627,37 @@ input[type="text"]:focus {
 
 .floating-reaction {
   position: absolute;
-  left: 50%;
-  bottom: 40%;
-  transform: translateX(-50%);
-  font-size: 2rem;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 4rem;
+  line-height: 1;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
   pointer-events: none;
-  animation: float-up 1.6s ease-out forwards;
-  z-index: 5;
+  animation: reaction-pop 1.4s ease-out forwards;
+  z-index: 6;
 }
 
-@keyframes float-up {
+@keyframes reaction-pop {
   0% {
     opacity: 0;
-    transform: translate(-50%, 0) scale(0.6);
+    transform: scale(0.4);
   }
-  15% {
+  20% {
     opacity: 1;
-    transform: translate(-50%, -10px) scale(1.1);
+    transform: scale(1.2);
+  }
+  35% {
+    transform: scale(1);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -70px) scale(1);
+    transform: scale(1);
   }
 }
 
