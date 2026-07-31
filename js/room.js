@@ -391,6 +391,7 @@ function createPeerConnection(peerId) {
   };
 
   pc.onconnectionstatechange = () => {
+    console.log(`[peer ${peerId.slice(0, 4)}] connectionState: ${pc.connectionState}`);
     if (pc.connectionState === "failed") {
       handleConnectionLost(peerId);
     } else if (pc.connectionState === "disconnected") {
@@ -410,11 +411,15 @@ function createPeerConnection(peerId) {
 }
 
 // 연결이 끊어지면 기존 연결을 정리하고, 상대가 아직 방(Presence)에 남아있으면 재연결을 시도한다.
+// 상대방에게도 "reconnect-request"를 보내서 자기 쪽 연결도 같이 버리고 새로 만들게 한다 —
+// 나만 새 연결을 준비하고 상대는 예전(멈춰버린) 연결을 그대로 들고 있으면 서로 안 맞아서
+// 영영 다시 못 붙는 상황을 막기 위함이다.
 function handleConnectionLost(peerId) {
   removePeer(peerId);
   if (!channel) return;
   const state = channel.presenceState();
   if (state[peerId]) {
+    sendSignal(peerId, { type: "reconnect-request" });
     setTimeout(() => connectToPeer(peerId), RECONNECT_RETRY_DELAY_MS);
   }
 }
@@ -441,6 +446,14 @@ async function connectToPeer(peerId) {
 
 async function handleSignal(payload) {
   const { from, type } = payload;
+
+  if (type === "reconnect-request") {
+    // 상대가 자기 쪽 연결이 끊긴 걸 감지했다는 신호. 나도 기존 연결을 버리고 새로 맺는다.
+    removePeer(from);
+    setTimeout(() => connectToPeer(from), RECONNECT_RETRY_DELAY_MS);
+    return;
+  }
+
   const { pc } = getOrCreatePeer(from);
 
   if (type === "offer") {
