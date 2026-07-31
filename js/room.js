@@ -2,12 +2,14 @@ const params = new URLSearchParams(location.search);
 const roomCode = (params.get("code") || "").toUpperCase();
 const isHost = params.get("host") === "1";
 const roomName = params.get("name") ? decodeURIComponent(params.get("name")) : "미팅";
+const nickname = params.get("nickname") ? decodeURIComponent(params.get("nickname")).slice(0, 20) : "";
 
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 const JOIN_CHECK_DELAY_MS = 1200;
 
 const clientId = crypto.randomUUID();
 const peers = new Map(); // peerId -> { pc: RTCPeerConnection }
+const peerMeta = new Map(); // peerId -> 마지막으로 받은 presence 정보 (닉네임 등)
 
 let localStream = null;
 let localScreenStream = null;
@@ -16,10 +18,30 @@ let micOn = true;
 let camOn = true;
 let isSharingScreen = false;
 let sharingPeerId = null; // 지금 화면 공유 중인 사람의 clientId (없으면 null)
+let handRaised = false;
 let chatOpen = false;
 let unreadChatCount = 0;
 
 const screenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+
+function defaultLabel(id) {
+  return "참가자 " + id.slice(0, 4);
+}
+
+// 항상 이 객체 전체를 다시 track()해서 필드가 서로 덮어써지지 않게 한다.
+const myPresence = {
+  nickname: nickname || defaultLabel(clientId),
+  joinedAt: Date.now(),
+  micOn: true,
+  sharing: false,
+  sharingSince: 0,
+  handRaised: false,
+};
+
+function trackPresence(patch) {
+  Object.assign(myPresence, patch);
+  return channel.track(myPresence);
+}
 
 const el = {
   loading: document.getElementById("state-loading"),
@@ -37,6 +59,7 @@ const el = {
   btnToggleMic: document.getElementById("btn-toggle-mic"),
   btnToggleCam: document.getElementById("btn-toggle-cam"),
   btnScreenShare: document.getElementById("btn-screen-share"),
+  btnRaiseHand: document.getElementById("btn-raise-hand"),
   btnLeave: document.getElementById("btn-leave"),
   btnRetry: document.getElementById("btn-retry"),
   btnToggleChat: document.getElementById("btn-toggle-chat"),
@@ -93,9 +116,22 @@ function addVideoTile(peerId, stream, { local }) {
     if (local) video.muted = true;
     const tag = document.createElement("div");
     tag.className = "tag";
-    tag.textContent = local ? "나" : "참가자";
+    tag.textContent = local ? "나" : defaultLabel(peerId);
+
+    const indicators = document.createElement("div");
+    indicators.className = "tile-indicators";
+    const micIndicator = document.createElement("span");
+    micIndicator.className = "mic-indicator hidden";
+    micIndicator.textContent = "🔇";
+    const handIndicator = document.createElement("span");
+    handIndicator.className = "hand-indicator hidden";
+    handIndicator.textContent = "✋";
+    indicators.appendChild(micIndicator);
+    indicators.appendChild(handIndicator);
+
     tile.appendChild(video);
     tile.appendChild(tag);
+    tile.appendChild(indicators);
     el.tileRow.appendChild(tile);
   }
   tile.querySelector("video").srcObject = stream;
@@ -104,6 +140,26 @@ function addVideoTile(peerId, stream, { local }) {
 function removeVideoTile(peerId) {
   const tile = document.getElementById(videoTileId(peerId));
   if (tile) tile.remove();
+}
+
+// Presence에 올라온 닉네임/마이크/손들기 상태를 각 타일과 채팅 라벨에 반영한다.
+function applyPresenceMeta() {
+  if (!channel) return;
+  const state = channel.presenceState();
+  for (const key of Object.keys(state)) {
+    const meta = state[key][0];
+    if (!meta) continue;
+    peerMeta.set(key, meta);
+
+    const tile = document.getElementById(videoTileId(key));
+    if (!tile) continue;
+    const tagEl = tile.querySelector(".tag");
+    if (tagEl) tagEl.textContent = key === clientId ? "나" : meta.nickname || defaultLabel(key);
+    const micIndicator = tile.querySelector(".mic-indicator");
+    if (micIndicator) micIndicator.classList.toggle("hidden", meta.micOn !== false);
+    const handIndicator = tile.querySelector(".hand-indicator");
+    if (handIndicator) handIndicator.classList.toggle("hidden", !meta.handRaised);
+  }
 }
 
 // 화면 공유 중인 사람의 타일은 메인 스테이지로, 아니면 다시 작은 줄로 되돌린다.
@@ -196,7 +252,7 @@ async function startScreenShare() {
 
   isSharingScreen = true;
   el.btnScreenShare.classList.add("active");
-  await channel.track({ joinedAt: Date.now(), sharing: true, sharingSince: Date.now() });
+  await trackPresence({ sharing: true, sharingSince: Date.now() });
   recomputeSharer();
 }
 
@@ -216,7 +272,7 @@ async function stopScreenShare() {
     if (sender && camTrack) sender.replaceTrack(camTrack);
   });
 
-  if (channel) await channel.track({ joinedAt: Date.now(), sharing: false });
+  if (channel) await trackPresence({ sharing: false });
   recomputeSharer();
 }
 
@@ -316,6 +372,7 @@ function setupControls() {
     localStream.getAudioTracks().forEach((track) => (track.enabled = micOn));
     el.btnToggleMic.classList.toggle("off", !micOn);
     el.btnToggleMic.textContent = micOn ? "🎤" : "🔇";
+    trackPresence({ micOn });
   });
 
   el.btnToggleCam.addEventListener("click", () => {
@@ -337,6 +394,12 @@ function setupControls() {
     el.btnScreenShare.disabled = true;
     el.btnScreenShare.title = "이 브라우저에서는 화면 공유를 지원하지 않아요";
   }
+
+  el.btnRaiseHand.addEventListener("click", () => {
+    handRaised = !handRaised;
+    el.btnRaiseHand.classList.toggle("active", handRaised);
+    trackPresence({ handRaised });
+  });
 
   el.btnLeave.addEventListener("click", leaveRoom);
 
@@ -361,7 +424,9 @@ function setupControls() {
 }
 
 function peerLabel(id) {
-  return id === clientId ? "나" : "참가자 " + id.slice(0, 4);
+  if (id === clientId) return "나";
+  const meta = peerMeta.get(id);
+  return (meta && meta.nickname) || defaultLabel(id);
 }
 
 function openChat() {
@@ -448,9 +513,11 @@ async function init() {
     })
     .on("presence", { event: "leave" }, ({ key }) => {
       removePeer(key);
+      peerMeta.delete(key);
       recomputeSharer();
     })
     .on("presence", { event: "sync" }, () => {
+      applyPresenceMeta();
       recomputeSharer();
     })
     .on("broadcast", { event: "chat" }, ({ payload }) => {
@@ -461,7 +528,8 @@ async function init() {
     })
     .subscribe(async (status) => {
       if (status !== "SUBSCRIBED") return;
-      await channel.track({ joinedAt: Date.now(), sharing: false });
+      await trackPresence({});
+      applyPresenceMeta();
 
       // 이미 들어와있는 사람이 있으면 host 여부와 상관없이 항상 먼저 연결을 시도한다.
       // (예: 방을 만든 사람이 재접속하는 경우에도 기존 참가자와 반드시 연결돼야 함)

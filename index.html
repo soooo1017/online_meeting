@@ -31,6 +31,15 @@
           placeholder="예: 토요일 스터디"
           autocomplete="off"
         />
+        <label for="input-nickname-create">닉네임</label>
+        <input
+          id="input-nickname-create"
+          type="text"
+          maxlength="20"
+          placeholder="다른 사람들에게 보여질 이름"
+          autocomplete="off"
+        />
+        <div class="error-text" id="create-error"></div>
         <div class="form-actions">
           <button type="button" class="btn btn-text btn-back">뒤로</button>
           <button type="submit" class="btn btn-primary">미팅 만들기</button>
@@ -51,6 +60,14 @@
           placeholder="예: FX92KD"
           autocomplete="off"
           style="text-transform: uppercase; letter-spacing: 0.1em"
+        />
+        <label for="input-nickname-join">닉네임</label>
+        <input
+          id="input-nickname-join"
+          type="text"
+          maxlength="20"
+          placeholder="다른 사람들에게 보여질 이름"
+          autocomplete="off"
         />
         <div class="error-text" id="join-error"></div>
         <div class="form-actions">
