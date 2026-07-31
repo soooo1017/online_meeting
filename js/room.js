@@ -16,6 +16,8 @@ let micOn = true;
 let camOn = true;
 let isSharingScreen = false;
 let sharingPeerId = null; // 지금 화면 공유 중인 사람의 clientId (없으면 null)
+let chatOpen = false;
+let unreadChatCount = 0;
 
 const screenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 
@@ -37,6 +39,13 @@ const el = {
   btnScreenShare: document.getElementById("btn-screen-share"),
   btnLeave: document.getElementById("btn-leave"),
   btnRetry: document.getElementById("btn-retry"),
+  btnToggleChat: document.getElementById("btn-toggle-chat"),
+  chatBadge: document.getElementById("chat-badge"),
+  chatPanel: document.getElementById("chat-panel"),
+  btnCloseChat: document.getElementById("btn-close-chat"),
+  chatMessages: document.getElementById("chat-messages"),
+  chatForm: document.getElementById("chat-form"),
+  chatInput: document.getElementById("chat-input"),
 };
 
 el.btnRetry.addEventListener("click", () => location.reload());
@@ -336,6 +345,66 @@ function setupControls() {
     const link = new URL(`room.html?code=${roomCode}`, location.href).toString();
     copyToClipboard(link, el.btnCopyLink, "링크 복사");
   });
+
+  el.btnToggleChat.addEventListener("click", () => (chatOpen ? closeChat() : openChat()));
+  el.btnCloseChat.addEventListener("click", closeChat);
+
+  el.chatForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = el.chatInput.value.trim();
+    if (!text) return;
+    const message = { from: clientId, text, ts: Date.now() };
+    channel.send({ type: "broadcast", event: "chat", payload: message });
+    appendChatMessage(message, { mine: true });
+    el.chatInput.value = "";
+  });
+}
+
+function peerLabel(id) {
+  return id === clientId ? "나" : "참가자 " + id.slice(0, 4);
+}
+
+function openChat() {
+  chatOpen = true;
+  el.chatPanel.classList.add("open");
+  unreadChatCount = 0;
+  updateChatBadge();
+  el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+}
+
+function closeChat() {
+  chatOpen = false;
+  el.chatPanel.classList.remove("open");
+}
+
+function updateChatBadge() {
+  el.chatBadge.textContent = unreadChatCount > 9 ? "9+" : String(unreadChatCount);
+  el.chatBadge.classList.toggle("hidden", unreadChatCount === 0);
+}
+
+function appendChatMessage(message, { mine }) {
+  const empty = el.chatMessages.querySelector(".chat-empty");
+  if (empty) empty.remove();
+
+  const bubble = document.createElement("div");
+  bubble.className = "chat-message" + (mine ? " mine" : "");
+
+  const sender = document.createElement("span");
+  sender.className = "sender";
+  sender.textContent = mine ? "나" : peerLabel(message.from);
+  bubble.appendChild(sender);
+
+  const text = document.createElement("span");
+  text.textContent = message.text;
+  bubble.appendChild(text);
+
+  el.chatMessages.appendChild(bubble);
+  el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+
+  if (!mine && !chatOpen) {
+    unreadChatCount += 1;
+    updateChatBadge();
+  }
 }
 
 async function copyToClipboard(text, button, resetLabel) {
@@ -383,6 +452,9 @@ async function init() {
     })
     .on("presence", { event: "sync" }, () => {
       recomputeSharer();
+    })
+    .on("broadcast", { event: "chat" }, ({ payload }) => {
+      if (payload.from !== clientId) appendChatMessage(payload, { mine: false });
     })
     .on("broadcast", { event: "signal" }, ({ payload }) => {
       if (payload.to === clientId) handleSignal(payload);

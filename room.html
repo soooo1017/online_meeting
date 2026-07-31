@@ -43,7 +43,25 @@
       <button class="icon-btn" id="btn-toggle-mic" title="마이크 켜기/끄기">🎤</button>
       <button class="icon-btn" id="btn-toggle-cam" title="캠 켜기/끄기">📷</button>
       <button class="icon-btn" id="btn-screen-share" title="화면 공유">🖥️</button>
+      <button class="icon-btn" id="btn-toggle-chat" title="채팅">
+        💬
+        <span id="chat-badge" class="chat-badge hidden"></span>
+      </button>
       <button class="icon-btn leave" id="btn-leave">나가기</button>
+    </div>
+
+    <div id="chat-panel" class="chat-panel">
+      <div class="chat-panel-header">
+        <strong>채팅</strong>
+        <button class="copy-btn" id="btn-close-chat">닫기</button>
+      </div>
+      <div id="chat-messages" class="chat-messages">
+        <p class="chat-empty">아직 메시지가 없어요</p>
+      </div>
+      <form id="chat-form" class="chat-form">
+        <input id="chat-input" type="text" maxlength="500" placeholder="메시지 입력..." autocomplete="off" />
+        <button type="submit" class="btn btn-primary">전송</button>
+      </form>
     </div>
   </div>
 
