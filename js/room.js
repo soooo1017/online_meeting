@@ -725,11 +725,23 @@ function updateRoomName() {
 
 // ---- 미팅 기록(이름/시작·종료 시각/참여자) ----
 
+function localDateString(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 async function createMeetingLog() {
   try {
     const { data, error } = await supabaseClient
       .from("meetings")
-      .insert({ room_name: roomName, room_code: roomCode, participants: [myPresence.nickname] })
+      .insert({
+        room_name: roomName,
+        room_code: roomCode,
+        meeting_date: localDateString(new Date()),
+        participants: [myPresence.nickname],
+      })
       .select("id")
       .single();
     if (error) throw error;

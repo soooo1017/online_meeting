@@ -6,6 +6,7 @@ create table if not exists meetings (
   id uuid primary key default gen_random_uuid(),
   room_name text not null,
   room_code text not null,
+  meeting_date date not null default current_date,
   started_at timestamptz not null default now(),
   ended_at timestamptz,
   participants text[] not null default '{}'
@@ -25,3 +26,11 @@ create policy "anyone can select meetings" on meetings
 create policy "anyone can update meetings" on meetings
   for update
   using (true);
+
+-- ---------------------------------------------------------------
+-- 이미 meetings 테이블을 만드셨다면, 위 create table은 그냥 넘어가고
+-- (if not exists라 에러 안 남) 아래 한 줄만 실행하시면 meeting_date 컬럼이 추가돼요.
+-- 다만 새 컬럼은 테이블 맨 뒤에 붙기 때문에, started_at 앞에 보이게 하고 싶으시면
+-- Table Editor에서 meeting_date 컬럼을 드래그해서 순서만 옮겨주시면 됩니다.
+-- ---------------------------------------------------------------
+-- alter table meetings add column if not exists meeting_date date;
