@@ -111,6 +111,9 @@ const myPresence = {
   sharing: false,
   sharingSince: 0,
   handRaised: false,
+  isHost,
+  // 방 이름은 만든 사람의 링크에만 담겨있어서, 참여자는 이 값을 host의 Presence로 전달받아야 한다.
+  roomName: isHost ? roomName : null,
 };
 
 function trackPresence(patch) {
@@ -694,6 +697,22 @@ function appendChatMessage(message, { mine }) {
   }
 }
 
+// 방 이름은 host의 Presence를 통해서만 알 수 있으므로, 한 번 알게 되면 host가 나가도 계속 유지한다.
+let knownRoomName = isHost ? roomName : null;
+
+function updateRoomName() {
+  if (!channel) return;
+  const state = channel.presenceState();
+  for (const key of Object.keys(state)) {
+    const meta = state[key][0];
+    if (meta && meta.isHost && meta.roomName) {
+      knownRoomName = meta.roomName;
+      break;
+    }
+  }
+  el.roomNameLabel.textContent = knownRoomName || "미팅";
+}
+
 async function copyToClipboard(text, button, resetLabel) {
   try {
     await navigator.clipboard.writeText(text);
@@ -711,7 +730,7 @@ async function init() {
     return;
   }
 
-  el.roomNameLabel.textContent = roomName;
+  el.roomNameLabel.textContent = knownRoomName || "미팅";
   el.roomCodeLabel.textContent = roomCode;
   setupControls();
 
@@ -746,6 +765,7 @@ async function init() {
       recomputeSharer();
       recomputeRoomStartedAt();
       renderParticipantList();
+      updateRoomName();
     })
     .on("broadcast", { event: "chat" }, ({ payload }) => {
       if (payload.from !== clientId) appendChatMessage(payload, { mine: false });
