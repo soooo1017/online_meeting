@@ -6,6 +6,8 @@ const nickname = params.get("nickname") ? decodeURIComponent(params.get("nicknam
 
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 const JOIN_CHECK_DELAY_MS = 1200;
+const RECONNECT_GRACE_MS = 5000; // "disconnected" 상태가 이 시간 넘게 지속되면 재연결 시도
+const RECONNECT_RETRY_DELAY_MS = 1000;
 
 const clientId = crypto.randomUUID();
 const peers = new Map(); // peerId -> { pc: RTCPeerConnection }
@@ -381,12 +383,32 @@ function createPeerConnection(peerId) {
   };
 
   pc.onconnectionstatechange = () => {
-    if (["failed", "closed"].includes(pc.connectionState)) {
+    if (pc.connectionState === "failed") {
+      handleConnectionLost(peerId);
+    } else if (pc.connectionState === "disconnected") {
+      // 와이파이가 잠깐 끊기는 정도는 몇 초 안에 자연 복구되기도 해서, 바로 끊지 않고 잠깐 지켜본다.
+      setTimeout(() => {
+        const peer = peers.get(peerId);
+        if (peer && peer.pc === pc && pc.connectionState !== "connected") {
+          handleConnectionLost(peerId);
+        }
+      }, RECONNECT_GRACE_MS);
+    } else if (pc.connectionState === "closed") {
       removePeer(peerId);
     }
   };
 
   return pc;
+}
+
+// 연결이 끊어지면 기존 연결을 정리하고, 상대가 아직 방(Presence)에 남아있으면 재연결을 시도한다.
+function handleConnectionLost(peerId) {
+  removePeer(peerId);
+  if (!channel) return;
+  const state = channel.presenceState();
+  if (state[peerId]) {
+    setTimeout(() => connectToPeer(peerId), RECONNECT_RETRY_DELAY_MS);
+  }
 }
 
 function getOrCreatePeer(peerId) {
