@@ -159,7 +159,16 @@ const el = {
   btnCloseParticipants: document.getElementById("btn-close-participants"),
   participantsList: document.getElementById("participants-list"),
   elapsedTime: document.getElementById("elapsed-time"),
+  toast: document.getElementById("toast"),
 };
+
+let toastTimer = null;
+function showToast(message, duration = 5000) {
+  el.toast.textContent = message;
+  el.toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.toast.classList.remove("show"), duration);
+}
 
 el.btnRetry.addEventListener("click", () => location.reload());
 
@@ -323,6 +332,16 @@ function recomputeSharer() {
   updateLayout();
 }
 
+// getDisplayMedia 실패 사유는 대부분 "사용자가 선택 창에서 취소" 또는 "브라우저/OS가
+// 화면 기록 권한을 막음"인데, 둘 다 브라우저는 같은 NotAllowedError를 던져서 코드로는
+// 구분이 안 된다. 그래서 조용히 무시하지 않고, 흔한 원인(맥 시스템 권한 포함)을 안내한다.
+function displayMediaErrorMessage(err) {
+  if (err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) {
+    return "화면 공유가 취소되었거나 권한이 차단되어 있어요.\nMac이라면 시스템 설정 > 개인정보 보호 및 보안 > 화면 기록에서 브라우저 권한을 확인한 뒤 다시 시도해주세요.";
+  }
+  return "화면 공유를 시작하지 못했어요. 잠시 후 다시 시도해주세요.";
+}
+
 async function startScreenShare() {
   if (!screenShareSupported || isSharingScreen) return;
 
@@ -330,22 +349,45 @@ async function startScreenShare() {
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
   } catch (err) {
-    return; // 사용자가 선택 창에서 취소한 경우
+    showToast(displayMediaErrorMessage(err));
+    return;
   }
 
-  localScreenStream = stream;
   const screenTrack = stream.getVideoTracks()[0];
-  screenTrack.onended = () => stopScreenShare();
+  if (!screenTrack) {
+    showToast(displayMediaErrorMessage(null));
+    stream.getTracks().forEach((track) => track.stop());
+    return;
+  }
 
-  peers.forEach(({ pc }) => {
-    const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
-    if (sender) sender.replaceTrack(screenTrack);
-  });
+  try {
+    localScreenStream = stream;
+    const startedAt = Date.now();
+    screenTrack.onended = () => {
+      // 화면 공유 권한이 시스템 단에서 막혀 있으면 선택 직후 트랙이 바로 끊기기도 한다.
+      if (Date.now() - startedAt < 1500) {
+        showToast("화면 공유가 바로 종료됐어요. 시스템 화면 기록 권한을 확인해주세요.\nMac: 시스템 설정 > 개인정보 보호 및 보안 > 화면 기록");
+      }
+      stopScreenShare();
+    };
 
-  isSharingScreen = true;
-  el.btnScreenShare.classList.add("active");
-  await trackPresence({ sharing: true, sharingSince: Date.now() });
-  recomputeSharer();
+    peers.forEach(({ pc }) => {
+      const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+      if (sender) sender.replaceTrack(screenTrack);
+    });
+
+    isSharingScreen = true;
+    el.btnScreenShare.classList.add("active");
+    await trackPresence({ sharing: true, sharingSince: Date.now() });
+    recomputeSharer();
+  } catch (err) {
+    console.error("화면 공유 시작 중 오류", err);
+    showToast("화면 공유를 시작하는 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.");
+    stream.getTracks().forEach((track) => track.stop());
+    localScreenStream = null;
+    isSharingScreen = false;
+    el.btnScreenShare.classList.remove("active");
+  }
 }
 
 async function stopScreenShare() {
