@@ -37,9 +37,33 @@
       </div>
     </div>
 
-    <div class="video-grid" id="video-grid">
-      <div id="main-stage" class="main-stage hidden"></div>
-      <div id="tile-row" class="tile-row"></div>
+    <div class="room-body">
+      <div class="video-grid" id="video-grid">
+        <div id="main-stage" class="main-stage hidden"></div>
+        <div id="tile-row" class="tile-row"></div>
+      </div>
+
+      <div id="chat-panel" class="chat-panel">
+        <div class="chat-panel-header">
+          <strong>채팅</strong>
+          <button class="copy-btn" id="btn-close-chat">닫기</button>
+        </div>
+        <div id="chat-messages" class="chat-messages">
+          <p class="chat-empty">아직 메시지가 없어요</p>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <input id="chat-input" type="text" maxlength="500" placeholder="메시지 입력..." autocomplete="off" />
+          <button type="submit" class="btn btn-primary">전송</button>
+        </form>
+      </div>
+
+      <div id="participants-panel" class="chat-panel">
+        <div class="chat-panel-header">
+          <strong>참가자</strong>
+          <button class="copy-btn" id="btn-close-participants">닫기</button>
+        </div>
+        <div id="participants-list" class="participants-list"></div>
+      </div>
     </div>
 
     <div class="controls">
@@ -60,28 +84,6 @@
         <span id="chat-badge" class="chat-badge hidden"></span>
       </button>
       <button class="icon-btn leave" id="btn-leave">나가기</button>
-    </div>
-
-    <div id="chat-panel" class="chat-panel">
-      <div class="chat-panel-header">
-        <strong>채팅</strong>
-        <button class="copy-btn" id="btn-close-chat">닫기</button>
-      </div>
-      <div id="chat-messages" class="chat-messages">
-        <p class="chat-empty">아직 메시지가 없어요</p>
-      </div>
-      <form id="chat-form" class="chat-form">
-        <input id="chat-input" type="text" maxlength="500" placeholder="메시지 입력..." autocomplete="off" />
-        <button type="submit" class="btn btn-primary">전송</button>
-      </form>
-    </div>
-
-    <div id="participants-panel" class="chat-panel">
-      <div class="chat-panel-header">
-        <strong>참가자</strong>
-        <button class="copy-btn" id="btn-close-participants">닫기</button>
-      </div>
-      <div id="participants-list" class="participants-list"></div>
     </div>
 
     <div id="toast" class="toast" role="status"></div>

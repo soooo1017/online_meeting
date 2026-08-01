@@ -236,9 +236,27 @@ input[type="text"]:focus {
   background: #2b303b;
 }
 
+/* 캠 영역과 채팅/참가자 패널이 같은 가로줄을 나눠 쓰는 컨테이너.
+   패널이 열리면 이 영역 안에서 자리를 나눠 갖고, 캠 영역은 남는 공간만큼 줄어든다
+   (겹쳐서 캠을 가리는 대신, 화면 공유 때처럼 영역 자체가 나뉘도록). */
+.room-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 900px) {
+  .room-body {
+    flex-direction: row;
+  }
+}
+
 .video-grid {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -527,22 +545,31 @@ input[type="text"]:focus {
 }
 
 .chat-panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  height: 100%;
-  width: min(85vw, 320px);
+  flex: 0 0 0;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  z-index: 20;
-  transform: translateX(100%);
-  transition: transform 0.2s ease;
+  overflow: hidden;
+  transition: flex-basis 0.2s ease;
 }
 
 .chat-panel.open {
-  transform: translateX(0);
+  flex-basis: min(45vh, 320px);
+}
+
+@media (min-width: 900px) {
+  .chat-panel {
+    border-top: none;
+    border-left: 1px solid var(--border);
+  }
+
+  .chat-panel.open {
+    flex-basis: min(85vw, 320px);
+  }
 }
 
 .chat-panel-header {
