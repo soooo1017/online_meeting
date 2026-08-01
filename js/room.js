@@ -4,7 +4,20 @@ const isHost = params.get("host") === "1";
 const roomName = params.get("name") ? decodeURIComponent(params.get("name")) : "미팅";
 const nickname = params.get("nickname") ? decodeURIComponent(params.get("nickname")).slice(0, 20) : "";
 
-const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+// STUN만으로는 두 참가자가 서로 다른 네트워크(예: 한쪽은 이동통신망, 한쪽은 집 와이파이)에
+// 있고 그중 한쪽이 symmetric NAT을 쓰면 P2P 직접 연결 경로를 못 찾는다 — 이 경우 영상/음성이
+// 아예 전달되지 않고 검은 화면으로 멈춰버린다(Presence/채팅은 Supabase를 거쳐서 별개로 정상
+// 동작하니 헷갈리기 쉽다). TURN 서버는 이럴 때 중계 역할을 해준다. 아래는 Open Relay
+// Project(metered.ca)가 제공하는 공개 무료 TURN 서버로, 회원가입 없이 누구나 쓸 수 있지만
+// 공유 자원이라 트래픽이 몰리면 느려질 수 있다. 더 안정적으로 쓰고 싶다면 metered.ca 등에서
+// 무료 API 키를 받아 이 자리에 자신만의 TURN 자격 증명으로 바꿔 넣으면 된다.
+const ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:openrelay.metered.ca:80" },
+  { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
+];
 const JOIN_CHECK_DELAY_MS = 1200;
 const RECONNECT_GRACE_MS = 5000; // "disconnected" 상태가 이 시간 넘게 지속되면 재연결 시도
 const RECONNECT_RETRY_DELAY_MS = 1000;
@@ -204,16 +217,15 @@ function videoTileId(peerId) {
 }
 
 // 오디오 트랙이 섞인 원격 영상은 브라우저(특히 iOS Safari, 첫 방문 Chrome)가 사용자
-// 동작 없는 autoplay를 막아서 영상 자체가 아예 멈춰버릴 수 있다(검은 타일로 보이는 원인).
-// play()가 막히면 일단 음소거로 재생시켜 영상만이라도 보이게 하고, 타일을 눌러서 소리를
-// 켤 수 있게 안내한다. (로컬 미리보기는 항상 muted라 이 문제와 무관함)
-function playVideoWithAutoplayFallback(video, tile) {
+// 동작 없는 autoplay를 막아서 영상 자체가 아예 멈춰버릴 수 있다(검은 타일로 보이는 원인
+// 중 하나). play()가 막히면 일단 음소거로라도 재생시켜서 최소한 영상은 보이게 한다.
+// (로컬 미리보기는 항상 muted라 이 문제와 무관함)
+function playVideoWithAutoplayFallback(video) {
   const playResult = video.play();
   if (!playResult || typeof playResult.catch !== "function") return;
   playResult.catch(() => {
     if (video.muted) return;
     video.muted = true;
-    tile.classList.add("needs-unmute");
     video.play().catch(() => {});
   });
 }
@@ -248,17 +260,11 @@ function addVideoTile(peerId, stream, { local }) {
     tile.appendChild(video);
     tile.appendChild(tag);
     tile.appendChild(indicators);
-    tile.addEventListener("click", () => {
-      if (!tile.classList.contains("needs-unmute")) return;
-      video.muted = false;
-      tile.classList.remove("needs-unmute");
-      video.play().catch(() => {});
-    });
     el.tileRow.appendChild(tile);
   }
   const video = tile.querySelector("video");
   video.srcObject = stream;
-  playVideoWithAutoplayFallback(video, tile);
+  playVideoWithAutoplayFallback(video);
 }
 
 function removeVideoTile(peerId) {
