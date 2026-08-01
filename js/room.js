@@ -376,9 +376,18 @@ function sendSignal(to, data) {
   });
 }
 
+// 화면 공유 중에 새로 연결이 맺어지면(신규 입장, 재연결 등) 캠이 아니라 지금 공유 중인
+// 화면을 바로 넣어줘야 한다. 오디오는 항상 localStream 기준으로 묶어서, 수신 쪽에서
+// 오디오/비디오가 서로 다른 스트림으로 쪼개져 도착하는 일이 없게 한다.
+function getActiveVideoTrack() {
+  if (isSharingScreen && localScreenStream) return localScreenStream.getVideoTracks()[0];
+  return localStream.getVideoTracks()[0];
+}
+
 function createPeerConnection(peerId) {
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-  localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+  pc.addTrack(getActiveVideoTrack(), localStream);
+  localStream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
