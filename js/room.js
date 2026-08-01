@@ -8,6 +8,7 @@ const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 const JOIN_CHECK_DELAY_MS = 1200;
 const RECONNECT_GRACE_MS = 5000; // "disconnected" 상태가 이 시간 넘게 지속되면 재연결 시도
 const RECONNECT_RETRY_DELAY_MS = 1000;
+const MEETING_SYNC_INTERVAL_MS = 20000; // 진행 중인 미팅 기록을 이 주기로 계속 동기화
 
 const clientId = crypto.randomUUID();
 const peers = new Map(); // peerId -> { pc: RTCPeerConnection }
@@ -26,7 +27,6 @@ let unreadChatCount = 0;
 let participantsOpen = false;
 let roomStartedAt = Date.now();
 let meetingId = null; // meetings 테이블의 row id (host가 생성, presence로 전파)
-let hasRecordedJoin = false;
 
 const screenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "👏", "🎉"];
@@ -766,22 +766,41 @@ async function createMeetingLog() {
   }
 }
 
-async function recordJoinInLog() {
+// 미팅이 진행 중인 동안 주기적으로 호출된다. 참여자 목록을 지금 이 순간 방에 있는
+// 사람들과 합쳐서(한 번이라도 들어왔던 사람은 계속 남도록) 다시 써넣고, last_active_at을
+// 갱신한다. 한 번 실패해도 다음 주기에 다시 시도되므로 일회성 기록보다 훨씬 안정적이다.
+async function syncMeetingLog() {
+  if (!meetingId || !channel) return;
   try {
-    const { data, error } = await supabaseClient.from("meetings").select("participants").eq("id", meetingId).single();
-    if (error) throw error;
-    const current = data.participants || [];
-    if (current.includes(myPresence.nickname)) return;
-    await supabaseClient
+    const { data, error } = await supabaseClient
       .from("meetings")
-      .update({ participants: [...current, myPresence.nickname] })
+      .select("participants")
+      .eq("id", meetingId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      console.warn("meetings row를 찾을 수 없어요 (meetingId:", meetingId, ") — 테이블/RLS 설정을 확인해주세요.");
+      return;
+    }
+
+    const nicknames = new Set(data.participants || []);
+    const state = channel.presenceState();
+    Object.keys(state).forEach((key) => {
+      const meta = state[key][0];
+      if (meta && meta.nickname) nicknames.add(meta.nickname);
+    });
+
+    const { error: updateError } = await supabaseClient
+      .from("meetings")
+      .update({ participants: Array.from(nicknames), last_active_at: new Date().toISOString() })
       .eq("id", meetingId);
+    if (updateError) throw updateError;
   } catch (err) {
-    console.error("미팅 기록에 참여자 추가 실패", err);
+    console.error("미팅 기록 실시간 동기화 실패", err);
   }
 }
 
-// host의 Presence에서 meetingId를 전달받아, 참여자 본인을 기록에 추가한다.
+// host의 Presence에서 meetingId를 전달받는다.
 function updateMeetingId() {
   if (meetingId || !channel) return;
   const state = channel.presenceState();
@@ -792,10 +811,7 @@ function updateMeetingId() {
       break;
     }
   }
-  if (meetingId && !isHost && !hasRecordedJoin) {
-    hasRecordedJoin = true;
-    recordJoinInLog();
-  }
+  if (meetingId) syncMeetingLog();
 }
 
 async function copyToClipboard(text, button, resetLabel) {
@@ -867,12 +883,14 @@ async function init() {
       if (isHost) {
         await createMeetingLog();
         myPresence.meetingId = meetingId;
+        syncMeetingLog();
       }
       await trackPresence({});
       applyPresenceMeta();
       recomputeRoomStartedAt();
       updateElapsedTime();
       setInterval(updateElapsedTime, 1000);
+      setInterval(syncMeetingLog, MEETING_SYNC_INTERVAL_MS);
 
       // 이미 들어와있는 사람이 있으면 host 여부와 상관없이 항상 먼저 연결을 시도한다.
       // (예: 방을 만든 사람이 재접속하는 경우에도 기존 참가자와 반드시 연결돼야 함)

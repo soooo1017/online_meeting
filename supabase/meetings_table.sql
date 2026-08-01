@@ -9,6 +9,7 @@ create table if not exists meetings (
   meeting_date date not null default current_date,
   started_at timestamptz not null default now(),
   ended_at timestamptz,
+  last_active_at timestamptz not null default now(),
   participants text[] not null default '{}'
 );
 
@@ -34,3 +35,4 @@ create policy "anyone can update meetings" on meetings
 -- Table Editor에서 meeting_date 컬럼을 드래그해서 순서만 옮겨주시면 됩니다.
 -- ---------------------------------------------------------------
 -- alter table meetings add column if not exists meeting_date date;
+-- alter table meetings add column if not exists last_active_at timestamptz not null default now();
