@@ -9,6 +9,7 @@ const JOIN_CHECK_DELAY_MS = 1200;
 const RECONNECT_GRACE_MS = 5000; // "disconnected" 상태가 이 시간 넘게 지속되면 재연결 시도
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const MEETING_SYNC_INTERVAL_MS = 20000; // 진행 중인 미팅 기록을 이 주기로 계속 동기화
+const MEETING_STALE_MS = 90000; // last_active_at이 이만큼 안 갱신되면 비정상 종료로 간주 (동기화 주기의 4~5배)
 
 const clientId = crypto.randomUUID();
 const peers = new Map(); // peerId -> { pc: RTCPeerConnection }
@@ -481,6 +482,23 @@ function removePeer(peerId) {
   detachSpeakingDetector(peerId);
 }
 
+// 나 말고 남아있는 사람이 없을 때만 "진짜로 끝났다"고 기록한다. 이걸 아무나 나갈 때마다
+// 찍어버리면, 한 명만 먼저 나가고 다른 사람은 계속 남아있는 상황도 "종료됨"으로 잘못
+// 기록되어 초대코드 무효화 판단(isRoomCodeExpired)이 틀어진다.
+// leaveRoom()(정상적으로 나가기 버튼을 누른 경우)뿐 아니라, presence의 leave 이벤트에서도
+// 호출된다 — 상대가 강제종료/인터넷끊김으로 사라졌을 때 "남은 사람"이 대신 감지해서 기록한다.
+async function markEndedIfEmpty() {
+  if (!meetingId || !channel) return;
+  const state = channel.presenceState();
+  const stillHere = Object.keys(state).filter((key) => key !== clientId);
+  if (stillHere.length > 0) return;
+  try {
+    await supabaseClient.from("meetings").update({ ended_at: new Date().toISOString() }).eq("id", meetingId);
+  } catch (err) {
+    console.error("미팅 기록 종료 시각 저장 실패", err);
+  }
+}
+
 async function leaveRoom() {
   peers.forEach((_, peerId) => removePeer(peerId));
   detachSpeakingDetector(clientId);
@@ -488,22 +506,7 @@ async function leaveRoom() {
   if (localScreenStream) localScreenStream.getTracks().forEach((track) => track.stop());
 
   if (channel) await channel.untrack();
-
-  // 나 말고 남아있는 사람이 없을 때만 "진짜로 끝났다"고 기록한다. 이걸 아무나 나갈 때마다
-  // 찍어버리면, 한 명만 먼저 나가고 다른 사람은 계속 남아있는 상황도 "종료됨"으로 잘못
-  // 기록되어 초대코드 무효화 판단(checkCodeNotExpired)이 틀어진다.
-  if (meetingId && channel) {
-    const state = channel.presenceState();
-    const stillHere = Object.keys(state).filter((key) => key !== clientId);
-    if (stillHere.length === 0) {
-      try {
-        await supabaseClient.from("meetings").update({ ended_at: new Date().toISOString() }).eq("id", meetingId);
-      } catch (err) {
-        console.error("미팅 기록 종료 시각 저장 실패", err);
-      }
-    }
-  }
-
+  await markEndedIfEmpty();
   if (channel) await supabaseClient.removeChannel(channel);
   // href로 이동하면 이 페이지가 히스토리에 남아서, 뒤로가기를 누르면 이미 나간 회의 화면이
   // (심하면 bfcache에 저장된 예전 상태 그대로) 다시 보인다. replace로 아예 히스토리에서 지운다.
@@ -763,13 +766,28 @@ async function isRoomCodeExpired() {
   try {
     const { data, error } = await supabaseClient
       .from("meetings")
-      .select("ended_at")
+      .select("id, ended_at, last_active_at")
       .eq("room_code", roomCode)
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (error) throw error;
-    return !!(data && data.ended_at);
+    if (!data) return false;
+    if (data.ended_at) return true;
+
+    // 아무도 나가기를 누르지 못하고(강제종료/인터넷끊김) 사라진 경우, ended_at은 끝까지 안
+    // 찍힌다. last_active_at(20초마다 갱신됨)이 한참 멈춰있으면 사실상 끝난 걸로 보고,
+    // 이 참에 기록도 종료 처리해서 다음부터는 바로 판단할 수 있게 한다.
+    const staleMs = Date.now() - new Date(data.last_active_at).getTime();
+    if (staleMs > MEETING_STALE_MS) {
+      try {
+        await supabaseClient.from("meetings").update({ ended_at: data.last_active_at }).eq("id", data.id);
+      } catch (err) {
+        console.error("멈춰있던 미팅 기록 종료 처리 실패", err);
+      }
+      return true;
+    }
+    return false;
   } catch (err) {
     console.error("초대코드 만료 여부 확인 실패 (기록 없이 그냥 진행함)", err);
     return false; // 확인 자체가 안 되면 막지 않고 진행 (가용성 우선)
@@ -894,6 +912,7 @@ async function init() {
       recomputeSharer();
       recomputeRoomStartedAt();
       renderParticipantList();
+      markEndedIfEmpty();
     })
     .on("presence", { event: "sync" }, () => {
       applyPresenceMeta();
