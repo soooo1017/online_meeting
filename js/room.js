@@ -203,6 +203,21 @@ function videoTileId(peerId) {
   return `tile-${peerId}`;
 }
 
+// 오디오 트랙이 섞인 원격 영상은 브라우저(특히 iOS Safari, 첫 방문 Chrome)가 사용자
+// 동작 없는 autoplay를 막아서 영상 자체가 아예 멈춰버릴 수 있다(검은 타일로 보이는 원인).
+// play()가 막히면 일단 음소거로 재생시켜 영상만이라도 보이게 하고, 타일을 눌러서 소리를
+// 켤 수 있게 안내한다. (로컬 미리보기는 항상 muted라 이 문제와 무관함)
+function playVideoWithAutoplayFallback(video, tile) {
+  const playResult = video.play();
+  if (!playResult || typeof playResult.catch !== "function") return;
+  playResult.catch(() => {
+    if (video.muted) return;
+    video.muted = true;
+    tile.classList.add("needs-unmute");
+    video.play().catch(() => {});
+  });
+}
+
 function addVideoTile(peerId, stream, { local }) {
   let tile = document.getElementById(videoTileId(peerId));
   if (!tile) {
@@ -233,9 +248,17 @@ function addVideoTile(peerId, stream, { local }) {
     tile.appendChild(video);
     tile.appendChild(tag);
     tile.appendChild(indicators);
+    tile.addEventListener("click", () => {
+      if (!tile.classList.contains("needs-unmute")) return;
+      video.muted = false;
+      tile.classList.remove("needs-unmute");
+      video.play().catch(() => {});
+    });
     el.tileRow.appendChild(tile);
   }
-  tile.querySelector("video").srcObject = stream;
+  const video = tile.querySelector("video");
+  video.srcObject = stream;
+  playVideoWithAutoplayFallback(video, tile);
 }
 
 function removeVideoTile(peerId) {
