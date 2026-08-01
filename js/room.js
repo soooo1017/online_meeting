@@ -486,17 +486,25 @@ async function leaveRoom() {
   detachSpeakingDetector(clientId);
   if (localStream) localStream.getTracks().forEach((track) => track.stop());
   if (localScreenStream) localScreenStream.getTracks().forEach((track) => track.stop());
-  if (meetingId) {
-    try {
-      await supabaseClient.from("meetings").update({ ended_at: new Date().toISOString() }).eq("id", meetingId);
-    } catch (err) {
-      console.error("미팅 기록 종료 시각 저장 실패", err);
+
+  if (channel) await channel.untrack();
+
+  // 나 말고 남아있는 사람이 없을 때만 "진짜로 끝났다"고 기록한다. 이걸 아무나 나갈 때마다
+  // 찍어버리면, 한 명만 먼저 나가고 다른 사람은 계속 남아있는 상황도 "종료됨"으로 잘못
+  // 기록되어 초대코드 무효화 판단(checkCodeNotExpired)이 틀어진다.
+  if (meetingId && channel) {
+    const state = channel.presenceState();
+    const stillHere = Object.keys(state).filter((key) => key !== clientId);
+    if (stillHere.length === 0) {
+      try {
+        await supabaseClient.from("meetings").update({ ended_at: new Date().toISOString() }).eq("id", meetingId);
+      } catch (err) {
+        console.error("미팅 기록 종료 시각 저장 실패", err);
+      }
     }
   }
-  if (channel) {
-    await channel.untrack();
-    await supabaseClient.removeChannel(channel);
-  }
+
+  if (channel) await supabaseClient.removeChannel(channel);
   // href로 이동하면 이 페이지가 히스토리에 남아서, 뒤로가기를 누르면 이미 나간 회의 화면이
   // (심하면 bfcache에 저장된 예전 상태 그대로) 다시 보인다. replace로 아예 히스토리에서 지운다.
   location.replace("index.html");
@@ -747,6 +755,27 @@ function localDateString(date) {
   return `${y}-${m}-${d}`;
 }
 
+// host=1 링크는 "방금 막 만든 빈 방이라 혼자인 게 정상"이라고 보고 존재 확인을 건너뛰는데,
+// 이 코드로 예전에 이미 다 끝난 미팅이 있었다면 그 예외를 적용하면 안 된다 (그러면 다 나간
+// 방이 옛날 링크로 계속 부활함). 같은 room_code의 가장 최근 기록에 ended_at이 찍혀있으면
+// "완전히 끝난 적 있는 코드"로 보고 막는다.
+async function isRoomCodeExpired() {
+  try {
+    const { data, error } = await supabaseClient
+      .from("meetings")
+      .select("ended_at")
+      .eq("room_code", roomCode)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return !!(data && data.ended_at);
+  } catch (err) {
+    console.error("초대코드 만료 여부 확인 실패 (기록 없이 그냥 진행함)", err);
+    return false; // 확인 자체가 안 되면 막지 않고 진행 (가용성 우선)
+  }
+}
+
 async function createMeetingLog() {
   try {
     const { data, error } = await supabaseClient
@@ -834,6 +863,11 @@ async function init() {
   el.roomNameLabel.textContent = knownRoomName || "미팅";
   el.roomCodeLabel.textContent = roomCode;
   setupControls();
+
+  if (isHost && (await isRoomCodeExpired())) {
+    showError("이 초대코드는 이미 종료된 미팅이에요.\n같은 코드로는 다시 열 수 없어요, 새로 미팅을 만들어주세요.");
+    return;
+  }
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
