@@ -804,8 +804,15 @@ input[type="text"]:focus {
   /* .controls가 가로 스크롤(overflow-x:auto)을 쓰면서 overflow-y도 같이 clip되어
      버튼 자리에 absolute로 띄우면 컨트롤 바 뒤에 가려 안 보였다. position:fixed로
      뷰포트 기준 좌표를 JS(positionReactionPicker)에서 계산해서 어떤 조상의 overflow에도
-     안 잘리게 한다. */
+     안 잘리게 한다.
+     display:none(.hidden)이 아니라 visibility로 숨긴다 — display:none이면 크기가
+     0이 되어서 버튼 바로 위에 띄우는 데 필요한 실제 높이를 잴 수가 없다(브라우저/기기마다
+     달라 보이는 원인이었음). 항상 레이아웃에 존재하게 해서 높이를 정확히 재고 그 값으로
+     top을 계산한다. */
   position: fixed;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
   transform: translateX(-50%);
   display: flex;
   gap: 6px;
@@ -814,6 +821,12 @@ input[type="text"]:focus {
   border-radius: 26px;
   padding: 6px;
   z-index: 20;
+}
+
+.reaction-picker.open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .reaction-picker button {

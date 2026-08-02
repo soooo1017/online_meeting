@@ -938,13 +938,13 @@ function setupControls() {
   buildReactionPicker();
   el.btnReaction.addEventListener("click", (e) => {
     e.stopPropagation();
-    const opening = el.reactionPicker.classList.contains("hidden");
+    const opening = !el.reactionPicker.classList.contains("open");
     if (opening) positionReactionPicker();
-    el.reactionPicker.classList.toggle("hidden");
+    el.reactionPicker.classList.toggle("open");
   });
   document.addEventListener("click", (e) => {
     if (!el.reactionPicker.contains(e.target) && e.target !== el.btnReaction) {
-      el.reactionPicker.classList.add("hidden");
+      el.reactionPicker.classList.remove("open");
     }
   });
 
@@ -1051,11 +1051,16 @@ function peerLabel(id) {
 // ---- 리액션 ----
 
 // reaction-picker는 position:fixed라 뷰포트 기준 좌표가 필요하다. 버튼 바로 위, 가운데
-// 정렬로 뜨도록 버튼의 현재 위치를 기준으로 계산한다.
+// 정렬로 뜨도록 버튼의 현재 위치를 기준으로 계산한다. window.innerHeight를 거쳐서
+// bottom으로 계산하면 기기/브라우저마다 주소창·툴바 높이 처리 방식이 달라 오차가
+// 생겼다(맥에서는 컨트롤 바에 거의 붙어 보이는 문제로 나타남) — top을 직접 계산해서
+// innerHeight에 의존하지 않게 한다. picker는 항상 레이아웃에 존재(visibility로만
+// 숨김)하니 실제 높이(offsetHeight)를 정확히 잴 수 있다.
+const REACTION_PICKER_GAP = 16;
 function positionReactionPicker() {
   const rect = el.btnReaction.getBoundingClientRect();
   el.reactionPicker.style.left = `${rect.left + rect.width / 2}px`;
-  el.reactionPicker.style.bottom = `${window.innerHeight - rect.top + 12}px`;
+  el.reactionPicker.style.top = `${rect.top - el.reactionPicker.offsetHeight - REACTION_PICKER_GAP}px`;
 }
 
 function buildReactionPicker() {
@@ -1066,7 +1071,7 @@ function buildReactionPicker() {
     btn.addEventListener("click", () => {
       channel.send({ type: "broadcast", event: "reaction", payload: { from: clientId, emoji } });
       showFloatingReaction(clientId, emoji);
-      el.reactionPicker.classList.add("hidden");
+      el.reactionPicker.classList.remove("open");
     });
     el.reactionPicker.appendChild(btn);
   });
