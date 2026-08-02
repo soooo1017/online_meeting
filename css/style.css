@@ -801,9 +801,11 @@ input[type="text"]:focus {
 }
 
 .reaction-picker {
-  position: absolute;
-  bottom: 64px;
-  left: 50%;
+  /* .controls가 가로 스크롤(overflow-x:auto)을 쓰면서 overflow-y도 같이 clip되어
+     버튼 자리에 absolute로 띄우면 컨트롤 바 뒤에 가려 안 보였다. position:fixed로
+     뷰포트 기준 좌표를 JS(positionReactionPicker)에서 계산해서 어떤 조상의 overflow에도
+     안 잘리게 한다. */
+  position: fixed;
   transform: translateX(-50%);
   display: flex;
   gap: 6px;
@@ -811,6 +813,7 @@ input[type="text"]:focus {
   border: 1px solid var(--border);
   border-radius: 26px;
   padding: 6px;
+  z-index: 20;
 }
 
 .reaction-picker button {

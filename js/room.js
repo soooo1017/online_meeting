@@ -938,6 +938,8 @@ function setupControls() {
   buildReactionPicker();
   el.btnReaction.addEventListener("click", (e) => {
     e.stopPropagation();
+    const opening = el.reactionPicker.classList.contains("hidden");
+    if (opening) positionReactionPicker();
     el.reactionPicker.classList.toggle("hidden");
   });
   document.addEventListener("click", (e) => {
@@ -1047,6 +1049,14 @@ function peerLabel(id) {
 }
 
 // ---- 리액션 ----
+
+// reaction-picker는 position:fixed라 뷰포트 기준 좌표가 필요하다. 버튼 바로 위, 가운데
+// 정렬로 뜨도록 버튼의 현재 위치를 기준으로 계산한다.
+function positionReactionPicker() {
+  const rect = el.btnReaction.getBoundingClientRect();
+  el.reactionPicker.style.left = `${rect.left + rect.width / 2}px`;
+  el.reactionPicker.style.bottom = `${window.innerHeight - rect.top + 12}px`;
+}
 
 function buildReactionPicker() {
   REACTION_EMOJIS.forEach((emoji) => {
