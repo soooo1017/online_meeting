@@ -2,6 +2,7 @@ const CODE_LENGTH = 6;
 // 0/O, 1/I/L처럼 헷갈리는 문자는 제외
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const NICKNAME_STORAGE_KEY = "same-meeting-nickname";
+const CREATOR_CODE_VERIFIED_KEY = "same-meeting-creator-code-verified";
 
 function generateRoomCode() {
   const values = new Uint32Array(CODE_LENGTH);
@@ -30,7 +31,26 @@ function saveNickname(name) {
   }
 }
 
-document.getElementById("btn-start").addEventListener("click", () => showView("view-create"));
+// 한번 코드를 확인받은 브라우저는 다음에 "방 만들기"를 눌러도 코드를 또 안 물어본다.
+function isCreatorCodeVerified() {
+  try {
+    return localStorage.getItem(CREATOR_CODE_VERIFIED_KEY) === "1";
+  } catch (err) {
+    return false;
+  }
+}
+
+function markCreatorCodeVerified() {
+  try {
+    localStorage.setItem(CREATOR_CODE_VERIFIED_KEY, "1");
+  } catch (err) {
+    // 시크릿 모드 등 localStorage를 못 쓰는 환경이면 매번 다시 물어보게 됨
+  }
+}
+
+document.getElementById("btn-start").addEventListener("click", () => {
+  showView(isCreatorCodeVerified() ? "view-create" : "view-creator-code");
+});
 document.getElementById("btn-join").addEventListener("click", () => showView("view-join"));
 document.querySelectorAll(".btn-back").forEach((btn) => {
   btn.addEventListener("click", () => showView("view-landing"));
@@ -39,6 +59,40 @@ document.querySelectorAll(".btn-back").forEach((btn) => {
 const savedNickname = loadSavedNickname();
 document.getElementById("input-nickname-create").value = savedNickname;
 document.getElementById("input-nickname-join").value = savedNickname;
+
+document.getElementById("form-creator-code").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById("creator-code-error");
+  const submitBtn = e.target.querySelector("button[type=submit]");
+  const code = document.getElementById("input-creator-code").value.trim();
+
+  if (!/^\d{5}$/.test(code)) {
+    errorEl.textContent = "5자리 숫자로 입력해주세요.";
+    return;
+  }
+  errorEl.textContent = "";
+  submitBtn.disabled = true;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from("creator_codes")
+      .select("id")
+      .eq("code", code)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      errorEl.textContent = "코드가 올바르지 않아요. 다시 확인해주세요.";
+      return;
+    }
+    markCreatorCodeVerified();
+    showView("view-create");
+  } catch (err) {
+    console.error("코드 확인 실패", err);
+    errorEl.textContent = "코드를 확인하는 중 문제가 생겼어요. 잠시 후 다시 시도해주세요.";
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
 
 document.getElementById("form-create").addEventListener("submit", (e) => {
   e.preventDefault();

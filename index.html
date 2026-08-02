@@ -18,6 +18,29 @@
       </div>
     </div>
 
+    <!-- 방 만들기 권한 확인 화면 -->
+    <div id="view-creator-code" class="card view hidden">
+      <h1>방 만들기</h1>
+      <p class="sub">미리 받은 5자리 코드를 입력하면 방을 만들 수 있어요. (코드가 없다면 초대받은 방에 "참여하기"로 들어가주세요)</p>
+      <form id="form-creator-code">
+        <label for="input-creator-code">코드</label>
+        <input
+          id="input-creator-code"
+          type="text"
+          inputmode="numeric"
+          pattern="\d{5}"
+          maxlength="5"
+          placeholder="5자리 숫자"
+          autocomplete="off"
+        />
+        <div class="error-text" id="creator-code-error"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-text btn-back">뒤로</button>
+          <button type="submit" class="btn btn-primary">확인</button>
+        </div>
+      </form>
+    </div>
+
     <!-- 미팅 시작하기 화면 -->
     <div id="view-create" class="card view hidden">
       <h1>미팅 시작하기</h1>
@@ -78,6 +101,9 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabaseClient.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>
