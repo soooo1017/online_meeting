@@ -709,12 +709,28 @@ async function stopScreenShare() {
   recomputeSharer();
 }
 
-function sendSignal(to, data) {
-  channel.send({
-    type: "broadcast",
-    event: "signal",
-    payload: { from: clientId, to, ...data },
-  });
+// offer/answer/ICE candidate가 유실되면 그 한 쌍(pair)은 영영 연결이 안 되거나 한참
+// 뒤에야 재연결 로직(handleConnectionLost)을 통해 겨우 복구된다 — 참가자가 늘어날수록
+// 신호가 몰려서 유실 가능성도 커지므로, 서버 ack을 확인하고 실패하면 짧게 재시도한다.
+const SIGNAL_RETRY_DELAYS_MS = [300, 800, 1500];
+async function sendSignal(to, data, attempt = 0) {
+  let status;
+  try {
+    status = await channel.send({
+      type: "broadcast",
+      event: "signal",
+      payload: { from: clientId, to, ...data },
+    });
+  } catch (err) {
+    status = "error";
+  }
+  if (status !== "ok" && attempt < SIGNAL_RETRY_DELAYS_MS.length) {
+    await new Promise((resolve) => setTimeout(resolve, SIGNAL_RETRY_DELAYS_MS[attempt]));
+    return sendSignal(to, data, attempt + 1);
+  }
+  if (status !== "ok") {
+    console.error(`시그널 전송 실패 (${data.type}, to ${to.slice(0, 4)})`);
+  }
 }
 
 // 화면 공유 중에 새로 연결이 맺어지면(신규 입장, 재연결 등) 캠이 아니라 지금 공유 중인
@@ -1618,8 +1634,14 @@ async function init() {
   addVideoTile(clientId, localStream, { local: true });
   attachSpeakingDetector(clientId, localStream);
 
+  // broadcast: { ack: true }로 채널을 열면 channel.send()가 서버가 실제로 메시지를
+  // 받았는지 확인한 뒤에 응답한다 (기본값은 응답 없이 그냥 보내고 끝 — 전달 여부를
+  // 전혀 알 수 없다). 참가자가 늘어날수록 offer/answer/ICE candidate 신호가 한꺼번에
+  // 몰려서, 이 확인이 없으면 일부가 조용히 유실돼도 알 방법이 없었다. 인원이 많을 때
+  // "누구는 들리고 누구는 안 들리고" 하던 문제의 유력한 원인이라 sendSignal에서
+  // 실패 시 재시도할 수 있게 이 설정을 켠다.
   channel = supabaseClient.channel(`room-${roomCode}`, {
-    config: { presence: { key: clientId } },
+    config: { presence: { key: clientId }, broadcast: { ack: true } },
   });
 
   channel
