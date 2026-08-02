@@ -66,8 +66,8 @@ document.getElementById("form-creator-code").addEventListener("submit", async (e
   const submitBtn = e.target.querySelector("button[type=submit]");
   const code = document.getElementById("input-creator-code").value.trim();
 
-  if (!/^\d{5}$/.test(code)) {
-    errorEl.textContent = "5자리 숫자로 입력해주세요.";
+  if (!/^\d{6}$/.test(code)) {
+    errorEl.textContent = "6자리 숫자로 입력해주세요.";
     return;
   }
   errorEl.textContent = "";
