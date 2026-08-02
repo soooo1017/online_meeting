@@ -39,6 +39,9 @@ let handRaised = false;
 let chatOpen = false;
 let unreadChatCount = 0;
 let participantsOpen = false;
+// 사용자가 채팅/참가자 패널 크기를 드래그로 조절하면 여기에 기억해뒀다가,
+// 닫았다 다시 열어도 같은 크기로 유지되게 한다 (기본 크기는 CSS의 .open 규칙이 정함).
+const panelCustomSize = { chat: null, participants: null };
 let roomStartedAt = Date.now();
 let meetingId = null; // meetings 테이블의 row id (host가 생성, presence로 전파)
 
@@ -648,7 +651,18 @@ function setupControls() {
     channel.send({ type: "broadcast", event: "chat", payload: message });
     appendChatMessage(message, { mine: true });
     el.chatInput.value = "";
+    resizeChatInput();
   });
+
+  // textarea라 Enter가 기본적으로 줄바꿈이라, Enter만 누르면 전송하고
+  // Shift+Enter일 때만 줄바꿈이 들어가도록 (흔한 메신저 관례) 분리한다.
+  el.chatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      el.chatForm.requestSubmit();
+    }
+  });
+  el.chatInput.addEventListener("input", resizeChatInput);
 
   el.btnToggleParticipants.addEventListener("click", () => (participantsOpen ? closeParticipants() : openParticipants()));
   el.btnCloseParticipants.addEventListener("click", closeParticipants);
@@ -662,6 +676,53 @@ function setupControls() {
     if (!el.reactionPicker.contains(e.target) && e.target !== el.btnReaction) {
       el.reactionPicker.classList.add("hidden");
     }
+  });
+
+  setupPanelResizer(el.chatPanel);
+  setupPanelResizer(el.participantsPanel);
+}
+
+// 채팅/참가자 패널의 기본 크기(.open의 flex-basis)는 그대로 두고, 사용자가 손잡이를
+// 드래그했을 때만 인라인 flex-basis로 덮어써서 캠 영역과 크기를 나눠 갖게 한다.
+// 데스크톱은 좌우(너비), 모바일은 상하로 쌓이니 위아래(높이)로 드래그 방향이 바뀐다.
+function setupPanelResizer(panel) {
+  const handle = panel.querySelector(".panel-resizer");
+  if (!handle) return;
+  const key = handle.dataset.panel; // "chat" | "participants"
+  const isHorizontal = () => window.matchMedia("(min-width: 900px)").matches;
+
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    const horizontal = isHorizontal();
+    const startPos = horizontal ? e.clientX : e.clientY;
+    const startSize = horizontal ? panel.getBoundingClientRect().width : panel.getBoundingClientRect().height;
+    const containerSize = horizontal
+      ? panel.parentElement.getBoundingClientRect().width
+      : panel.parentElement.getBoundingClientRect().height;
+    const maxSize = Math.max(containerSize - 200, 160); // 캠 영역이 최소한은 남도록
+    panel.classList.add("resizing");
+    document.body.style.userSelect = "none";
+
+    const onMove = (moveEvent) => {
+      const pos = horizontal ? moveEvent.clientX : moveEvent.clientY;
+      // 손잡이가 패널의 시작 모서리(왼쪽/위쪽)에 있어서, 컨테이너 안쪽으로 끌수록 패널이 커진다.
+      const delta = startPos - pos;
+      const newSize = Math.min(Math.max(startSize + delta, 160), maxSize);
+      panel.style.flexBasis = `${newSize}px`;
+      panelCustomSize[key] = newSize;
+    };
+
+    const onUp = (upEvent) => {
+      handle.releasePointerCapture(upEvent.pointerId);
+      panel.classList.remove("resizing");
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   });
 }
 
@@ -703,12 +764,16 @@ function openParticipants() {
   closeChat();
   participantsOpen = true;
   el.participantsPanel.classList.add("open");
+  if (panelCustomSize.participants != null) {
+    el.participantsPanel.style.flexBasis = `${panelCustomSize.participants}px`;
+  }
   renderParticipantList();
 }
 
 function closeParticipants() {
   participantsOpen = false;
   el.participantsPanel.classList.remove("open");
+  el.participantsPanel.style.flexBasis = "";
 }
 
 function renderParticipantList() {
@@ -769,10 +834,17 @@ function updateElapsedTime() {
   el.elapsedTime.textContent = formatElapsed(Date.now() - roomStartedAt);
 }
 
+// 줄바꿈이 늘어나는 만큼 입력창 높이도 같이 늘어나게 한다 (CSS max-height 넘어가면 그때부터 스크롤).
+function resizeChatInput() {
+  el.chatInput.style.height = "auto";
+  el.chatInput.style.height = `${el.chatInput.scrollHeight}px`;
+}
+
 function openChat() {
   closeParticipants();
   chatOpen = true;
   el.chatPanel.classList.add("open");
+  if (panelCustomSize.chat != null) el.chatPanel.style.flexBasis = `${panelCustomSize.chat}px`;
   unreadChatCount = 0;
   updateChatBadge();
   el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
@@ -781,6 +853,7 @@ function openChat() {
 function closeChat() {
   chatOpen = false;
   el.chatPanel.classList.remove("open");
+  el.chatPanel.style.flexBasis = "";
 }
 
 function updateChatBadge() {
@@ -801,6 +874,7 @@ function appendChatMessage(message, { mine }) {
   bubble.appendChild(sender);
 
   const text = document.createElement("span");
+  text.className = "text";
   text.textContent = message.text;
   bubble.appendChild(text);
 

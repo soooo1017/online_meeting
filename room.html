@@ -44,6 +44,7 @@
       </div>
 
       <div id="chat-panel" class="chat-panel">
+        <div class="panel-resizer" data-panel="chat"></div>
         <div class="chat-panel-header">
           <strong>채팅</strong>
           <button class="copy-btn" id="btn-close-chat">닫기</button>
@@ -52,12 +53,13 @@
           <p class="chat-empty">아직 메시지가 없어요</p>
         </div>
         <form id="chat-form" class="chat-form">
-          <input id="chat-input" type="text" maxlength="500" placeholder="메시지 입력..." autocomplete="off" />
+          <textarea id="chat-input" rows="1" maxlength="500" placeholder="메시지 입력..."></textarea>
           <button type="submit" class="btn btn-primary">전송</button>
         </form>
       </div>
 
       <div id="participants-panel" class="chat-panel">
+        <div class="panel-resizer" data-panel="participants"></div>
         <div class="chat-panel-header">
           <strong>참가자</strong>
           <button class="copy-btn" id="btn-close-participants">닫기</button>
