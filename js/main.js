@@ -3,6 +3,10 @@ const CODE_LENGTH = 6;
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const NICKNAME_STORAGE_KEY = "same-meeting-nickname";
 const CREATOR_CODE_VERIFIED_KEY = "same-meeting-creator-code-verified";
+// room.js의 MEETING_STALE_MS와 동일한 값. last_active_at이 이 시간 넘게 갱신 안 되면
+// (탭을 그냥 닫는 등 ended_at이 못 찍히는 비정상 종료) 사실상 끝난 미팅으로 간주한다.
+const MEETING_STALE_MS = 90000;
+const MEETING_LIST_REFRESH_MS = 15000;
 
 function generateRoomCode() {
   const values = new Uint32Array(CODE_LENGTH);
@@ -70,11 +74,17 @@ document.getElementById("input-nickname-join").value = savedNickname;
 async function loadPublicMeetings() {
   const container = document.getElementById("public-meeting-items");
   try {
+    // ended_at만으로는 "지금 진행 중"을 보장 못 한다 — 마지막 참가자가 나가기 버튼 대신
+    // 그냥 탭/브라우저를 닫아버리면 ended_at이 영영 안 찍힐 수 있음(beforeunload는 비동기
+    // DB 업데이트를 끝까지 못 기다림). 그래서 20초마다 갱신되는 last_active_at이 최근인
+    // 것만 "진행 중"으로 본다 — 방치된 채 끝난 미팅이 목록에 계속 남는 걸 막는다.
+    const activeSince = new Date(Date.now() - MEETING_STALE_MS).toISOString();
     const { data, error } = await supabaseClient
       .from("meetings")
       .select("room_code, room_name, host_nickname, has_password")
       .eq("is_public", true)
       .is("ended_at", null)
+      .gte("last_active_at", activeSince)
       .order("started_at", { ascending: false })
       .limit(30);
     if (error) throw error;
@@ -129,6 +139,13 @@ function renderPublicMeetings(meetings) {
 }
 
 loadPublicMeetings();
+// 첫 화면에 계속 머물러 있는 동안에는 목록이 저절로 최신 상태를 유지하도록 주기적으로
+// 다시 불러온다 (다른 화면을 보고 있을 때는 불필요한 조회를 하지 않는다).
+setInterval(() => {
+  if (!document.getElementById("view-landing").classList.contains("hidden")) {
+    loadPublicMeetings();
+  }
+}, MEETING_LIST_REFRESH_MS);
 
 document.getElementById("form-creator-code").addEventListener("submit", async (e) => {
   e.preventDefault();
