@@ -47,7 +47,24 @@
         <div class="panel-resizer" data-panel="chat"></div>
         <div class="chat-panel-header">
           <strong>채팅</strong>
-          <button class="copy-btn" id="btn-close-chat">닫기</button>
+          <div class="chat-header-actions">
+            <button class="copy-btn" id="btn-chat-settings" title="채팅 미리보기 설정">⚙️</button>
+            <button class="copy-btn" id="btn-close-chat">닫기</button>
+          </div>
+        </div>
+        <div id="chat-settings-popover" class="chat-settings-popover hidden">
+          <label class="chat-settings-row">
+            <input type="checkbox" id="chat-preview-toggle" />
+            <span>채팅 안 열었을 때 새 메시지 미리보기</span>
+          </label>
+          <div class="chat-settings-row chat-settings-duration">
+            <span>유지 시간</span>
+            <div class="chat-duration-options" id="chat-duration-options">
+              <button type="button" class="duration-option" data-duration="3000">3초</button>
+              <button type="button" class="duration-option" data-duration="5000">5초</button>
+              <button type="button" class="duration-option" data-duration="8000">8초</button>
+            </div>
+          </div>
         </div>
         <div id="chat-messages" class="chat-messages">
           <p class="chat-empty">아직 메시지가 없어요</p>
@@ -89,6 +106,7 @@
     </div>
 
     <div id="toast" class="toast" role="status"></div>
+    <div id="chat-toast-stack" class="chat-toast-stack" aria-live="polite"></div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

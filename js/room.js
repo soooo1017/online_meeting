@@ -43,6 +43,51 @@ let participantsOpen = false;
 // 닫았다 다시 열어도 같은 크기로 유지되게 한다 (기본 크기는 CSS의 .open 규칙이 정함).
 const panelCustomSize = { chat: null, participants: null };
 let roomStartedAt = Date.now();
+
+// ---- 채팅 미리보기(채팅창을 안 열었을 때 방송 채팅처럼 오른쪽 아래에 잠깐 뜨는 알림) 설정 ----
+const CHAT_PREVIEW_ENABLED_KEY = "same-meeting-chat-preview-enabled";
+const CHAT_PREVIEW_DURATION_KEY = "same-meeting-chat-preview-duration";
+const CHAT_PREVIEW_DURATIONS = [3000, 5000, 8000];
+const CHAT_PREVIEW_DEFAULT_DURATION = 5000;
+const CHAT_TOAST_GAP = 8;
+
+function loadChatPreviewEnabled() {
+  try {
+    const v = localStorage.getItem(CHAT_PREVIEW_ENABLED_KEY);
+    return v === null ? true : v === "1";
+  } catch (err) {
+    return true;
+  }
+}
+
+function saveChatPreviewEnabled(enabled) {
+  try {
+    localStorage.setItem(CHAT_PREVIEW_ENABLED_KEY, enabled ? "1" : "0");
+  } catch (err) {
+    // 시크릿 모드 등에서는 그냥 이번 세션 동안만 적용됨
+  }
+}
+
+function loadChatPreviewDuration() {
+  try {
+    const v = parseInt(localStorage.getItem(CHAT_PREVIEW_DURATION_KEY), 10);
+    return CHAT_PREVIEW_DURATIONS.includes(v) ? v : CHAT_PREVIEW_DEFAULT_DURATION;
+  } catch (err) {
+    return CHAT_PREVIEW_DEFAULT_DURATION;
+  }
+}
+
+function saveChatPreviewDuration(ms) {
+  try {
+    localStorage.setItem(CHAT_PREVIEW_DURATION_KEY, String(ms));
+  } catch (err) {
+    // 무시
+  }
+}
+
+let chatPreviewEnabled = loadChatPreviewEnabled();
+let chatPreviewDuration = loadChatPreviewDuration();
+const chatToastQueue = []; // { el, timeoutId }, 오래된 것이 앞, 최신이 뒤
 let meetingId = null; // meetings 테이블의 row id (host가 생성, presence로 전파)
 
 const screenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
@@ -176,6 +221,11 @@ const el = {
   participantsList: document.getElementById("participants-list"),
   elapsedTime: document.getElementById("elapsed-time"),
   toast: document.getElementById("toast"),
+  chatToastStack: document.getElementById("chat-toast-stack"),
+  btnChatSettings: document.getElementById("btn-chat-settings"),
+  chatSettingsPopover: document.getElementById("chat-settings-popover"),
+  chatPreviewToggle: document.getElementById("chat-preview-toggle"),
+  chatDurationOptions: Array.from(document.querySelectorAll(".duration-option")),
 };
 
 let toastTimer = null;
@@ -664,6 +714,32 @@ function setupControls() {
   });
   el.chatInput.addEventListener("input", resizeChatInput);
 
+  el.chatPreviewToggle.checked = chatPreviewEnabled;
+  el.chatPreviewToggle.addEventListener("change", () => {
+    chatPreviewEnabled = el.chatPreviewToggle.checked;
+    saveChatPreviewEnabled(chatPreviewEnabled);
+    if (!chatPreviewEnabled) clearChatToasts();
+  });
+
+  el.chatDurationOptions.forEach((btn) => {
+    btn.classList.toggle("active", Number(btn.dataset.duration) === chatPreviewDuration);
+    btn.addEventListener("click", () => {
+      chatPreviewDuration = Number(btn.dataset.duration);
+      saveChatPreviewDuration(chatPreviewDuration);
+      el.chatDurationOptions.forEach((b) => b.classList.toggle("active", b === btn));
+    });
+  });
+
+  el.btnChatSettings.addEventListener("click", (e) => {
+    e.stopPropagation();
+    el.chatSettingsPopover.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!el.chatSettingsPopover.contains(e.target) && e.target !== el.btnChatSettings) {
+      el.chatSettingsPopover.classList.add("hidden");
+    }
+  });
+
   el.btnToggleParticipants.addEventListener("click", () => (participantsOpen ? closeParticipants() : openParticipants()));
   el.btnCloseParticipants.addEventListener("click", closeParticipants);
 
@@ -848,6 +924,7 @@ function openChat() {
   unreadChatCount = 0;
   updateChatBadge();
   el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+  clearChatToasts();
 }
 
 function closeChat() {
@@ -884,6 +961,67 @@ function appendChatMessage(message, { mine }) {
   if (!mine && !chatOpen) {
     unreadChatCount += 1;
     updateChatBadge();
+    showChatToastPreview(message);
+  }
+}
+
+// 채팅창을 안 열어놨을 때, 인터넷 방송 채팅처럼 오른쪽 아래에서 올라왔다가 잠깐 있다 사라지는
+// 미리보기. 여러 개가 겹치면 최신 메시지가 제일 아래, 오래된 메시지가 위로 밀려 올라간다.
+function showChatToastPreview(message) {
+  if (!chatPreviewEnabled || chatOpen) return;
+
+  const toastEl = document.createElement("div");
+  toastEl.className = "chat-toast";
+
+  const sender = document.createElement("span");
+  sender.className = "sender";
+  sender.textContent = peerLabel(message.from);
+  toastEl.appendChild(sender);
+
+  const text = document.createElement("span");
+  text.className = "text";
+  text.textContent = message.text;
+  toastEl.appendChild(text);
+
+  toastEl.style.bottom = "-16px"; // 아래에서 위로 슥 올라오는 시작 위치
+  el.chatToastStack.appendChild(toastEl);
+
+  const item = { el: toastEl, timeoutId: null };
+  chatToastQueue.push(item);
+
+  requestAnimationFrame(() => {
+    repositionChatToasts();
+    toastEl.style.opacity = "1";
+  });
+
+  item.timeoutId = setTimeout(() => removeChatToast(item), chatPreviewDuration);
+}
+
+function removeChatToast(item) {
+  const idx = chatToastQueue.indexOf(item);
+  if (idx === -1) return;
+  chatToastQueue.splice(idx, 1);
+  clearTimeout(item.timeoutId);
+  item.el.style.opacity = "0";
+  repositionChatToasts();
+  setTimeout(() => item.el.remove(), 250);
+}
+
+// 채팅창을 열면 미리보기는 더 이상 필요 없으니 남아있던 것들을 바로 정리한다.
+function clearChatToasts() {
+  chatToastQueue.splice(0).forEach((item) => {
+    clearTimeout(item.timeoutId);
+    item.el.remove();
+  });
+}
+
+// 최신 메시지가 스택 맨 아래(offset 0), 오래된 메시지일수록 그 위로 쌓이도록 위치를 다시 계산한다.
+function repositionChatToasts() {
+  let offset = 0;
+  for (let i = chatToastQueue.length - 1; i >= 0; i--) {
+    const item = chatToastQueue[i];
+    item.el.style.bottom = `${offset}px`;
+    offset += item.el.offsetHeight + CHAT_TOAST_GAP;
   }
 }
 

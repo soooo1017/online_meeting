@@ -635,6 +635,60 @@ input[type="text"]:focus {
   border-bottom: 1px solid var(--border);
 }
 
+.chat-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.chat-settings-popover {
+  position: absolute;
+  top: 52px;
+  right: 12px;
+  width: min(260px, calc(100% - 24px));
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.chat-settings-duration {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.chat-duration-options {
+  display: flex;
+  gap: 6px;
+}
+
+.duration-option {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.duration-option.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -830,4 +884,46 @@ input[type="text"]:focus {
 .toast.show {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+/* ---------- 채팅 미리보기 (인터넷 방송 채팅처럼 오른쪽 아래에서 올라왔다 사라짐) ---------- */
+
+.chat-toast-stack {
+  position: fixed;
+  right: 16px;
+  bottom: 90px;
+  width: min(300px, calc(100vw - 32px));
+  z-index: 20;
+  pointer-events: none;
+}
+
+.chat-toast {
+  position: absolute;
+  right: 0;
+  left: 0;
+  bottom: 0;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: bottom 0.25s ease, opacity 0.25s ease;
+}
+
+.chat-toast .sender {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.chat-toast .text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
