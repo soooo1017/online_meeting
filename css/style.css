@@ -363,6 +363,23 @@ input[type="text"]:focus {
   border-color: #fff;
 }
 
+.reconnect-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 4;
+}
+
+.reconnect-overlay .spinner {
+  width: 28px;
+  height: 28px;
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+}
+
 .video-tile video {
   width: 100%;
   height: 100%;
@@ -798,6 +815,43 @@ input[type="text"]:focus {
 
 .reaction-picker button:hover {
   background: var(--surface);
+}
+
+.sound-settings-popover {
+  position: absolute;
+  bottom: 64px;
+  right: 0;
+  width: min(280px, calc(100vw - 32px));
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10;
+}
+
+.sound-master-row {
+  font-weight: 600;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sound-settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sound-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
 }
 
 .floating-reaction {

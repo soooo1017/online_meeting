@@ -163,6 +163,148 @@ if (audioCtx) {
   );
 }
 
+// ---- 알림음 ----
+// 외부 음원 파일 없이 Web Audio API로 그때그때 짧은 톤을 합성해서 재생한다.
+// 발화자 감지에서 이미 만들어둔 audioCtx(사용자 클릭으로 resume까지 된 상태)를 그대로 재사용한다.
+const SOUND_TYPES = [
+  { key: "join", label: "참가자 입장", defaultOn: true },
+  { key: "leave", label: "참가자 퇴장", defaultOn: true },
+  { key: "handRaise", label: "손들기", defaultOn: true },
+  { key: "chat", label: "채팅 메시지", defaultOn: true },
+  { key: "shareStart", label: "화면 공유 시작", defaultOn: true },
+  { key: "shareStop", label: "화면 공유 종료", defaultOn: true },
+  { key: "handLower", label: "손 내리기", defaultOn: false },
+  { key: "reaction", label: "리액션 전송", defaultOn: false },
+  { key: "micToggle", label: "마이크 켜짐/꺼짐", defaultOn: false },
+  { key: "camToggle", label: "캠 켜짐/꺼짐", defaultOn: false },
+];
+
+const SOUND_MASTER_KEY = "same-meeting-sound-master";
+const SOUND_SETTING_PREFIX = "same-meeting-sound-";
+
+function loadSoundMaster() {
+  try {
+    const v = localStorage.getItem(SOUND_MASTER_KEY);
+    return v === null ? true : v === "1";
+  } catch (err) {
+    return true;
+  }
+}
+
+function saveSoundMaster(on) {
+  try {
+    localStorage.setItem(SOUND_MASTER_KEY, on ? "1" : "0");
+  } catch (err) {
+    // 무시
+  }
+}
+
+function loadSoundSetting(key, defaultOn) {
+  try {
+    const v = localStorage.getItem(SOUND_SETTING_PREFIX + key);
+    return v === null ? defaultOn : v === "1";
+  } catch (err) {
+    return defaultOn;
+  }
+}
+
+function saveSoundSetting(key, on) {
+  try {
+    localStorage.setItem(SOUND_SETTING_PREFIX + key, on ? "1" : "0");
+  } catch (err) {
+    // 무시
+  }
+}
+
+let soundMasterOn = loadSoundMaster();
+const soundSettings = {};
+SOUND_TYPES.forEach(({ key, defaultOn }) => {
+  soundSettings[key] = loadSoundSetting(key, defaultOn);
+});
+
+// 순수한 톤 하나를 짧게 재생한다. startTime은 지금 이 순간부터 몇 초 뒤에 시작할지(초 단위).
+function playTone({ freq, startTime = 0, duration = 0.12, type = "sine", gain = 0.15 }) {
+  const t0 = audioCtx.currentTime + startTime;
+  const osc = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  gainNode.gain.setValueAtTime(0.0001, t0);
+  gainNode.gain.linearRampToValueAtTime(gain, t0 + 0.01);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  osc.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.02);
+}
+
+// 주파수가 시간에 따라 미끄러지듯 바뀌는 스윕음 (손들기/손내리기 등에 사용).
+function playSweep({ fromFreq, toFreq, startTime = 0, duration = 0.15, gain = 0.13 }) {
+  const t0 = audioCtx.currentTime + startTime;
+  const osc = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(fromFreq, t0);
+  osc.frequency.linearRampToValueAtTime(toFreq, t0 + duration);
+  gainNode.gain.setValueAtTime(0.0001, t0);
+  gainNode.gain.linearRampToValueAtTime(gain, t0 + 0.01);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  osc.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.02);
+}
+
+const SOUND_PLAYERS = {
+  join() {
+    playTone({ freq: 880, startTime: 0, duration: 0.12 });
+    playTone({ freq: 1318.5, startTime: 0.1, duration: 0.16 });
+  },
+  leave() {
+    playTone({ freq: 1174.7, startTime: 0, duration: 0.11 });
+    playTone({ freq: 880, startTime: 0.09, duration: 0.11 });
+    playTone({ freq: 587.3, startTime: 0.18, duration: 0.18 });
+  },
+  handRaise() {
+    playSweep({ fromFreq: 500, toFreq: 1000, duration: 0.15 });
+  },
+  handLower() {
+    playSweep({ fromFreq: 700, toFreq: 400, duration: 0.12 });
+  },
+  chat() {
+    playTone({ freq: 1046.5, duration: 0.1, gain: 0.12 });
+  },
+  shareStart() {
+    playTone({ freq: 440, startTime: 0, duration: 0.12 });
+    playTone({ freq: 880, startTime: 0.1, duration: 0.18 });
+  },
+  shareStop() {
+    playTone({ freq: 880, startTime: 0, duration: 0.1 });
+    playTone({ freq: 440, startTime: 0.08, duration: 0.16 });
+  },
+  reaction() {
+    playTone({ freq: 1200, startTime: 0, duration: 0.06, gain: 0.1 });
+    playTone({ freq: 1500, startTime: 0.05, duration: 0.08, gain: 0.1 });
+  },
+  micToggle() {
+    playTone({ freq: 700, duration: 0.05, gain: 0.08, type: "square" });
+  },
+  camToggle() {
+    playTone({ freq: 700, duration: 0.05, gain: 0.08, type: "square" });
+  },
+};
+
+function playSound(key) {
+  if (!audioCtx || !soundMasterOn || !soundSettings[key]) return;
+  try {
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    const player = SOUND_PLAYERS[key];
+    if (player) player();
+  } catch (err) {
+    console.error("알림음 재생 실패", err);
+  }
+}
+
 function defaultLabel(id) {
   return "참가자 " + id.slice(0, 4);
 }
@@ -172,6 +314,7 @@ const myPresence = {
   nickname: nickname || defaultLabel(clientId),
   joinedAt: Date.now(),
   micOn: true,
+  camOn: true,
   sharing: false,
   sharingSince: 0,
   handRaised: false,
@@ -226,6 +369,10 @@ const el = {
   chatSettingsPopover: document.getElementById("chat-settings-popover"),
   chatPreviewToggle: document.getElementById("chat-preview-toggle"),
   chatDurationOptions: Array.from(document.querySelectorAll(".duration-option")),
+  btnSoundSettings: document.getElementById("btn-sound-settings"),
+  soundSettingsPopover: document.getElementById("sound-settings-popover"),
+  soundMasterToggle: document.getElementById("sound-master-toggle"),
+  soundSettingsList: document.getElementById("sound-settings-list"),
 };
 
 let toastTimer = null;
@@ -325,6 +472,27 @@ function removeVideoTile(peerId) {
   if (tile) tile.remove();
 }
 
+// 연결이 disconnected 상태로 들어가면(끊기기 직전, 몇 초 지켜보는 유예 구간) 화면이 멈춘
+// 채로 남아있을 수 있어서, 스피너를 띄워 "재연결 중"임을 알려준다.
+function setTileReconnecting(peerId, reconnecting) {
+  const tile = document.getElementById(videoTileId(peerId));
+  if (!tile) return;
+  tile.classList.toggle("reconnecting", reconnecting);
+  let overlay = tile.querySelector(".reconnect-overlay");
+  if (reconnecting) {
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "reconnect-overlay";
+      const spinner = document.createElement("div");
+      spinner.className = "spinner";
+      overlay.appendChild(spinner);
+      tile.appendChild(overlay);
+    }
+  } else if (overlay) {
+    overlay.remove();
+  }
+}
+
 // Presence에 올라온 닉네임/마이크/손들기 상태를 각 타일과 채팅 라벨에 반영한다.
 function applyPresenceMeta() {
   if (!channel) return;
@@ -332,7 +500,18 @@ function applyPresenceMeta() {
   for (const key of Object.keys(state)) {
     const meta = state[key][0];
     if (!meta) continue;
+    const prevMeta = peerMeta.get(key);
     peerMeta.set(key, meta);
+
+    // 다른 사람의 상태 변화만 소리로 알려준다 (내가 한 건 이미 알고 있으니 제외).
+    // prevMeta가 없으면 방금 처음 들어온 사람이라, 원래 켜져 있던 상태를 "변화"로 오인해
+    // 소리가 나지 않도록 건너뛴다.
+    if (prevMeta && key !== clientId) {
+      if (!prevMeta.handRaised && meta.handRaised) playSound("handRaise");
+      else if (prevMeta.handRaised && !meta.handRaised) playSound("handLower");
+      if ((prevMeta.micOn !== false) !== (meta.micOn !== false)) playSound("micToggle");
+      if ((prevMeta.camOn !== false) !== (meta.camOn !== false)) playSound("camToggle");
+    }
 
     const tile = document.getElementById(videoTileId(key));
     if (!tile) continue;
@@ -391,6 +570,7 @@ function hideLocalScreenPreview() {
 // Presence에 기록된 sharing 플래그를 보고 "지금 화면 공유 중인 사람"을 다시 계산한다.
 // 여러 명이 동시에 sharing:true인 순간(막 전환되는 찰나)이 있을 수 있어서,
 // 목록 순서가 아니라 sharingSince(공유 시작 시각)가 가장 최근인 사람을 우승자로 뽑는다.
+let lastSharingPeerId = null; // 화면 공유 시작/종료 알림음을 중복 없이 울리기 위한 이전 상태
 function recomputeSharer() {
   if (!channel) return;
   const state = channel.presenceState();
@@ -408,6 +588,13 @@ function recomputeSharer() {
   if (isSharingScreen && sharer !== clientId) {
     stopScreenShare();
     return; // stopScreenShare가 다시 recomputeSharer를 트리거함
+  }
+
+  // 내가 시작/종료한 공유는 이미 알고 있으니 소리 없이, 다른 사람 것만 알림음을 울린다.
+  if (sharer !== lastSharingPeerId) {
+    if (sharer && sharer !== clientId) playSound("shareStart");
+    else if (!sharer && lastSharingPeerId && lastSharingPeerId !== clientId) playSound("shareStop");
+    lastSharingPeerId = sharer;
   }
 
   sharingPeerId = sharer;
@@ -526,10 +713,14 @@ function createPeerConnection(peerId) {
 
   pc.onconnectionstatechange = () => {
     console.log(`[peer ${peerId.slice(0, 4)}] connectionState: ${pc.connectionState}`);
-    if (pc.connectionState === "failed") {
+    if (pc.connectionState === "connected") {
+      setTileReconnecting(peerId, false);
+    } else if (pc.connectionState === "failed") {
       handleConnectionLost(peerId);
     } else if (pc.connectionState === "disconnected") {
       // 와이파이가 잠깐 끊기는 정도는 몇 초 안에 자연 복구되기도 해서, 바로 끊지 않고 잠깐 지켜본다.
+      // 그동안은 화면이 멈춘 채로 남아있을 수 있어서 로딩 스피너로 "재연결 중"임을 알려준다.
+      setTileReconnecting(peerId, true);
       setTimeout(() => {
         const peer = peers.get(peerId);
         if (peer && peer.pc === pc && pc.connectionState !== "connected") {
@@ -660,6 +851,7 @@ function setupControls() {
     localStream.getVideoTracks().forEach((track) => (track.enabled = camOn));
     el.btnToggleCam.classList.toggle("off", !camOn);
     el.btnToggleCam.textContent = camOn ? "📷" : "🚫";
+    trackPresence({ camOn });
   });
 
   if (screenShareSupported) {
@@ -754,8 +946,54 @@ function setupControls() {
     }
   });
 
+  buildSoundSettings();
+  el.btnSoundSettings.addEventListener("click", (e) => {
+    e.stopPropagation();
+    el.soundSettingsPopover.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!el.soundSettingsPopover.contains(e.target) && e.target !== el.btnSoundSettings) {
+      el.soundSettingsPopover.classList.add("hidden");
+    }
+  });
+
   setupPanelResizer(el.chatPanel);
   setupPanelResizer(el.participantsPanel);
+}
+
+// 알림음 설정 패널: 맨 위 "전체 알림음" 하나, 그 아래 항목별 개별 on/off.
+function buildSoundSettings() {
+  updateSoundBellIcon();
+  el.soundMasterToggle.checked = soundMasterOn;
+  el.soundMasterToggle.addEventListener("change", () => {
+    soundMasterOn = el.soundMasterToggle.checked;
+    saveSoundMaster(soundMasterOn);
+    updateSoundBellIcon();
+  });
+
+  SOUND_TYPES.forEach(({ key, label }) => {
+    const row = document.createElement("label");
+    row.className = "sound-setting-row";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = soundSettings[key];
+    checkbox.addEventListener("change", () => {
+      soundSettings[key] = checkbox.checked;
+      saveSoundSetting(key, checkbox.checked);
+    });
+
+    const span = document.createElement("span");
+    span.textContent = label;
+
+    row.appendChild(checkbox);
+    row.appendChild(span);
+    el.soundSettingsList.appendChild(row);
+  });
+}
+
+function updateSoundBellIcon() {
+  el.btnSoundSettings.textContent = soundMasterOn ? "🔔" : "🔕";
 }
 
 // 채팅/참가자 패널의 기본 크기(.open의 flex-basis)는 그대로 두고, 사용자가 손잡이를
@@ -962,6 +1200,7 @@ function appendChatMessage(message, { mine }) {
     unreadChatCount += 1;
     updateChatBadge();
     showChatToastPreview(message);
+    playSound("chat");
   }
 }
 
@@ -1196,7 +1435,10 @@ async function init() {
 
   channel
     .on("presence", { event: "join" }, ({ key }) => {
-      if (key !== clientId) connectToPeer(key);
+      if (key !== clientId) {
+        connectToPeer(key);
+        playSound("join");
+      }
     })
     .on("presence", { event: "leave" }, ({ key }) => {
       removePeer(key);
@@ -1205,6 +1447,7 @@ async function init() {
       recomputeRoomStartedAt();
       renderParticipantList();
       markEndedIfEmpty();
+      if (key !== clientId) playSound("leave");
     })
     .on("presence", { event: "sync" }, () => {
       applyPresenceMeta();
@@ -1218,7 +1461,10 @@ async function init() {
       if (payload.from !== clientId) appendChatMessage(payload, { mine: false });
     })
     .on("broadcast", { event: "reaction" }, ({ payload }) => {
-      if (payload.from !== clientId) showFloatingReaction(payload.from, payload.emoji);
+      if (payload.from !== clientId) {
+        showFloatingReaction(payload.from, payload.emoji);
+        playSound("reaction");
+      }
     })
     .on("broadcast", { event: "signal" }, ({ payload }) => {
       if (payload.to === clientId) handleSignal(payload);
