@@ -450,11 +450,19 @@ input[type="text"]:focus {
   z-index: 2;
   background: var(--bg);
   display: flex;
-  justify-content: center;
+  justify-content: safe center;
   align-items: center;
   gap: 12px;
   padding: 16px;
   border-top: 1px solid var(--border);
+  /* 좁은 화면에서 버튼이 다 안 들어가면 양쪽이 잘려서 아예 안 보이고 눌리지도 않았다.
+     가로 스크롤을 허용해서 잘리는 대신 옆으로 밀어서 볼 수 있게 한다. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.controls::-webkit-scrollbar {
+  display: none;
 }
 
 .icon-btn {
@@ -470,6 +478,7 @@ input[type="text"]:focus {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 .icon-btn.off {
   background: var(--danger);
@@ -788,6 +797,7 @@ input[type="text"]:focus {
 
 .reaction-wrap {
   position: relative;
+  flex-shrink: 0;
 }
 
 .reaction-picker {
@@ -817,9 +827,14 @@ input[type="text"]:focus {
   background: var(--surface);
 }
 
+.sound-settings-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
 .sound-settings-popover {
   position: absolute;
-  bottom: 64px;
+  top: calc(100% + 8px);
   right: 0;
   width: min(280px, calc(100vw - 32px));
   max-height: 60vh;
