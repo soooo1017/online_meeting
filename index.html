@@ -16,6 +16,13 @@
         <button id="btn-start" class="btn btn-primary">온라인 미팅 시작하기</button>
         <button id="btn-join" class="btn btn-secondary">참여하기</button>
       </div>
+
+      <div class="meeting-list-section">
+        <h2>공개 미팅 목록</h2>
+        <div id="public-meeting-items" class="meeting-list">
+          <p class="meeting-list-empty">불러오는 중...</p>
+        </div>
+      </div>
     </div>
 
     <!-- 방 만들기 권한 확인 화면 -->
@@ -62,6 +69,31 @@
           placeholder="다른 사람들에게 보여질 이름"
           autocomplete="off"
         />
+
+        <label>공개 여부</label>
+        <div class="form-radio-group">
+          <label class="form-radio-option">
+            <input type="radio" name="visibility" value="private" checked />
+            비공개 (초대코드/링크로만 참여)
+          </label>
+          <label class="form-radio-option">
+            <input type="radio" name="visibility" value="public" />
+            공개 (미팅 목록에 표시)
+          </label>
+        </div>
+
+        <div id="create-password-wrap" class="hidden">
+          <label for="input-room-password">비밀번호 (선택, 4~6자리 숫자)</label>
+          <input
+            id="input-room-password"
+            type="text"
+            inputmode="numeric"
+            maxlength="6"
+            placeholder="비워두면 퍼블릭(누구나 참여)으로 표시돼요"
+            autocomplete="off"
+          />
+        </div>
+
         <div class="error-text" id="create-error"></div>
         <div class="form-actions">
           <button type="button" class="btn btn-text btn-back">뒤로</button>
@@ -90,6 +122,15 @@
           type="text"
           maxlength="20"
           placeholder="다른 사람들에게 보여질 이름"
+          autocomplete="off"
+        />
+        <label for="input-join-password">비밀번호 (필요한 방만 입력)</label>
+        <input
+          id="input-join-password"
+          type="text"
+          inputmode="numeric"
+          maxlength="6"
+          placeholder="비밀번호가 있는 방이면 입력해주세요"
           autocomplete="off"
         />
         <div class="error-text" id="join-error"></div>

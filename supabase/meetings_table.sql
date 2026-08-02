@@ -18,6 +18,18 @@ create table if not exists meetings (
 alter table meetings add column if not exists meeting_date date not null default current_date;
 alter table meetings add column if not exists last_active_at timestamptz not null default now();
 
+-- 공개 미팅 목록 기능용 컬럼.
+-- is_public: 방장이 "공개"를 선택했는지 (첫 화면 미팅 목록에 표시할지)
+-- password: 실제 비밀번호 값. 목록 조회 화면에서는 절대 select하지 않고, 참여할 때
+--   room_code+password가 둘 다 일치하는지 확인하는 용도로만 사용합니다 (틀린 값이면
+--   그냥 결과가 없을 뿐, 진짜 비밀번호가 뭔지는 알려주지 않음).
+-- has_password: 목록 화면에 "프라이빗/퍼블릭" 표시만 하기 위한 값(진짜 비밀번호는 노출 안 함).
+-- host_nickname: 목록에 "누가 연 방인지" 보여주기 위한 값.
+alter table meetings add column if not exists is_public boolean not null default false;
+alter table meetings add column if not exists password text;
+alter table meetings add column if not exists has_password boolean not null default false;
+alter table meetings add column if not exists host_nickname text;
+
 alter table meetings enable row level security;
 
 -- 계정/로그인 시스템이 없는 앱이라, 익명 키로 자유롭게 남기고 읽을 수 있게 둡니다.

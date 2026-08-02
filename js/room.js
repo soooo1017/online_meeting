@@ -3,6 +3,10 @@ const roomCode = (params.get("code") || "").toUpperCase();
 const isHost = params.get("host") === "1";
 const roomName = params.get("name") ? decodeURIComponent(params.get("name")) : "미팅";
 const nickname = params.get("nickname") ? decodeURIComponent(params.get("nickname")).slice(0, 20) : "";
+// 공개 여부/비밀번호는 방을 만든 host의 링크에만 담겨있다 (index.html에서 미팅 목록 노출
+// 여부를 정할 때 이미 확인/생성된 값). 참여자는 이 값과 무관하게 그냥 들어오면 된다.
+const isPublicRoom = params.get("public") === "1";
+const roomPassword = params.get("password") || null;
 
 // STUN만으로는 두 참가자가 서로 다른 네트워크(예: 한쪽은 이동통신망, 한쪽은 집 와이파이)에
 // 있고 그중 한쪽이 symmetric NAT을 쓰면 P2P 직접 연결 경로를 못 찾는다 — 이 경우 영상/음성이
@@ -420,15 +424,37 @@ function videoTileId(peerId) {
 // 동작 없는 autoplay를 막아서 영상 자체가 아예 멈춰버릴 수 있다(검은 타일로 보이는 원인
 // 중 하나). play()가 막히면 일단 음소거로라도 재생시켜서 최소한 영상은 보이게 한다.
 // (로컬 미리보기는 항상 muted라 이 문제와 무관함)
+//
+// 문제는 이렇게 음소거로 재생을 "살려낸" 뒤로는 아무 데서도 다시 소리를 켜주지 않았다는
+// 점이다 — 그래서 자동재생이 막힌 브라우저에서는 화면은 보여도 소리가 영영 안 들렸다
+// (발화자 표시 흰 테두리는 상대방이 자기 마이크 입력을 스스로 분석해서 켜는 것이라
+// 이 음소거와 무관하게 정상 동작하니, "테두리는 뜨는데 소리는 안 들림" 증상과 정확히
+// 맞아떨어진다). 안내 UI 없이, 사용자가 화면 아무 곳이나 처음 클릭/탭/키 입력하는 순간
+// (=진짜 사용자 동작) 자동으로 다시 소리를 켜지도록 한다.
+const autoplayMutedVideos = new Set();
+
 function playVideoWithAutoplayFallback(video) {
   const playResult = video.play();
   if (!playResult || typeof playResult.catch !== "function") return;
   playResult.catch(() => {
     if (video.muted) return;
     video.muted = true;
+    autoplayMutedVideos.add(video);
     video.play().catch(() => {});
   });
 }
+
+function unmuteAutoplayMutedVideos() {
+  if (autoplayMutedVideos.size === 0) return;
+  autoplayMutedVideos.forEach((video) => {
+    video.muted = false;
+    video.play().catch(() => {});
+  });
+  autoplayMutedVideos.clear();
+}
+
+document.addEventListener("pointerdown", unmuteAutoplayMutedVideos);
+document.addEventListener("keydown", unmuteAutoplayMutedVideos);
 
 function addVideoTile(peerId, stream, { local }) {
   let tile = document.getElementById(videoTileId(peerId));
@@ -469,7 +495,10 @@ function addVideoTile(peerId, stream, { local }) {
 
 function removeVideoTile(peerId) {
   const tile = document.getElementById(videoTileId(peerId));
-  if (tile) tile.remove();
+  if (!tile) return;
+  const video = tile.querySelector("video");
+  if (video) autoplayMutedVideos.delete(video);
+  tile.remove();
 }
 
 // 연결이 disconnected 상태로 들어가면(끊기기 직전, 몇 초 지켜보는 유예 구간) 화면이 멈춘
@@ -1342,6 +1371,10 @@ async function createMeetingLog() {
         room_code: roomCode,
         meeting_date: localDateString(new Date()),
         participants: [myPresence.nickname],
+        is_public: isPublicRoom,
+        has_password: !!roomPassword,
+        password: roomPassword,
+        host_nickname: myPresence.nickname,
       })
       .select("id, started_at")
       .single();
