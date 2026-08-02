@@ -1687,7 +1687,11 @@ async function init() {
       } else {
         await loadMeetingInfoFromDb();
       }
-      await loadChatHistory();
+      // 채팅 기록 조회는 "나 여기 있어요" 신호(trackPresence)와 아무 상관이 없는데
+      // 여기서 기다리게 하면, 그만큼 다른 참가자들에게 내 존재가 늦게 알려지고 P2P
+      // 연결 시작도 그만큼 밀린다 (참가자마다 이 조회에 걸리는 시간이 달라서, 사람마다
+      // 연결 지연이 들쭉날쭉해 보이는 원인이었다). await 없이 백그라운드로 돌린다.
+      loadChatHistory();
       await trackPresence({});
       applyPresenceMeta();
       updateElapsedTime();
