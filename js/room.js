@@ -23,6 +23,10 @@ const ICE_SERVERS = [
   { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
 ];
 const JOIN_CHECK_DELAY_MS = 1200;
+// 이미 있던 참가자와의 연결이 이 시간 안에 "connected"가 되면 그때 바로 방 화면을
+// 보여준다. 못 맺어도 무한정 기다리지 않고 이 시간이 지나면 일단 보여준다 — 그 뒤로는
+// 기존 재연결 로직이 이어서 처리한다 (오늘 이전까지의 동작과 최악의 경우는 동일).
+const MAX_INITIAL_CONNECT_WAIT_MS = 5000;
 const RECONNECT_GRACE_MS = 5000; // "disconnected" 상태가 이 시간 넘게 지속되면 재연결 시도
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const MEETING_SYNC_INTERVAL_MS = 20000; // 진행 중인 미팅 기록을 이 주기로 계속 동기화
@@ -793,6 +797,28 @@ function handleConnectionLost(peerId) {
     sendSignal(peerId, { type: "reconnect-request" });
     setTimeout(() => connectToPeer(peerId), RECONNECT_RETRY_DELAY_MS);
   }
+}
+
+// 방에 처음 들어갈 때, 이미 있던 사람들과의 연결이 실제로 맺어질 때까지(또는 시간 초과까지)
+// 화면을 보여주지 않고 기다리기 위한 함수. 이렇게 해야 방이 "짠" 하고 뜬 뒤에 오디오/영상이
+// 뒤늦게 하나씩 연결되는 게 아니라, 뜨는 순간 이미 다 들리고 보이는 것처럼 느껴진다.
+function waitForPeersConnected(peerIds, timeoutMs) {
+  if (peerIds.length === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    const checkIntervalMs = 200;
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      elapsed += checkIntervalMs;
+      const allConnected = peerIds.every((id) => {
+        const peer = peers.get(id);
+        return peer && peer.pc.connectionState === "connected";
+      });
+      if (allConnected || elapsed >= timeoutMs) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, checkIntervalMs);
+  });
 }
 
 function getOrCreatePeer(peerId) {
@@ -1630,7 +1656,9 @@ async function init() {
     return;
   }
 
-  showState("room");
+  // 방 화면은 아직 안 보여준다 — 채널 연결/기존 참가자와의 협상까지 끝난 뒤에 한번에
+  // 보여줘야 "짠 하고 뜨자마자 이미 다 들리는" 느낌이 난다. 그때까지는 이 로딩 화면 그대로.
+  el.loadingText.textContent = "미팅에 연결하는 중...";
   addVideoTile(clientId, localStream, { local: true });
   attachSpeakingDetector(clientId, localStream);
 
@@ -1690,8 +1718,9 @@ async function init() {
       // 채팅 기록 조회는 "나 여기 있어요" 신호(trackPresence)와 아무 상관이 없는데
       // 여기서 기다리게 하면, 그만큼 다른 참가자들에게 내 존재가 늦게 알려지고 P2P
       // 연결 시작도 그만큼 밀린다 (참가자마다 이 조회에 걸리는 시간이 달라서, 사람마다
-      // 연결 지연이 들쭉날쭉해 보이는 원인이었다). await 없이 백그라운드로 돌린다.
-      loadChatHistory();
+      // 연결 지연이 들쭉날쭉해 보이는 원인이었다). trackPresence는 기다리지 않게 하되,
+      // 결과 자체는 방을 보여주기 전에 확인한다(아래에서 await).
+      const chatHistoryPromise = loadChatHistory();
       await trackPresence({});
       applyPresenceMeta();
       updateElapsedTime();
@@ -1702,16 +1731,25 @@ async function init() {
       // (예: 방을 만든 사람이 재접속하는 경우에도 기존 참가자와 반드시 연결돼야 함)
       // "아무도 없다 = 에러"는 코드로 참여하는 사람에게만 적용한다.
       // host는 방금 막 만든 빈 방일 수 있으므로 혼자인 게 정상이다.
-      setTimeout(() => {
-        const state = channel.presenceState();
-        const others = Object.keys(state).filter((key) => key !== clientId);
-        if (others.length === 0 && !isHost) {
-          leavePeersOnly();
-          showError("방을 찾을 수 없어요.\n코드를 다시 확인하거나, 방이 이미 종료되지 않았는지 확인해주세요.");
-          return;
-        }
-        others.forEach((peerId) => connectToPeer(peerId));
-      }, JOIN_CHECK_DELAY_MS);
+      await new Promise((resolve) => setTimeout(resolve, JOIN_CHECK_DELAY_MS));
+      const state = channel.presenceState();
+      const others = Object.keys(state).filter((key) => key !== clientId);
+      if (others.length === 0 && !isHost) {
+        leavePeersOnly();
+        showError("방을 찾을 수 없어요.\n코드를 다시 확인하거나, 방이 이미 종료되지 않았는지 확인해주세요.");
+        return;
+      }
+      others.forEach((peerId) => connectToPeer(peerId));
+
+      // 이미 있던 사람들과의 연결이 실제로 맺어질 때까지(최대 MAX_INITIAL_CONNECT_WAIT_MS)
+      // 기다렸다가, 그제서야 방 화면을 보여준다. 다 못 맺어도 무한정 기다리진 않고 일단
+      // 보여준다 — 그 뒤로는 기존 재연결 로직이 이어서 처리하니 최악의 경우도 이전과 같다.
+      if (others.length > 0) {
+        el.loadingText.textContent = "다른 참가자와 연결 확인 중...";
+      }
+      await Promise.all([chatHistoryPromise, waitForPeersConnected(others, MAX_INITIAL_CONNECT_WAIT_MS)]);
+
+      showState("room");
     });
 }
 
