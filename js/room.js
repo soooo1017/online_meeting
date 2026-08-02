@@ -1123,17 +1123,10 @@ function renderParticipantList() {
 }
 
 // ---- 경과 시간 ----
-
-function recomputeRoomStartedAt() {
-  if (!channel) return;
-  const state = channel.presenceState();
-  let earliest = myPresence.joinedAt;
-  for (const key of Object.keys(state)) {
-    const meta = state[key][0];
-    if (meta && meta.joinedAt && meta.joinedAt < earliest) earliest = meta.joinedAt;
-  }
-  roomStartedAt = earliest;
-}
+// roomStartedAt은 meetings 테이블의 started_at(방을 처음 만든 시각, 절대 안 바뀜)을 그대로
+// 쓴다 (reuseOrCreateMeetingLog/loadMeetingInfoFromDb에서 설정됨). 예전에는 presence의
+// joinedAt 중 가장 이른 값으로 매번 다시 계산했는데, 그러면 중간에 들어오거나 새로고침한
+// 사람만 남아있는 순간에는 "그 사람이 들어온 시각"이 시작 시각으로 잘못 계산됐다.
 
 function formatElapsed(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -1335,12 +1328,68 @@ async function createMeetingLog() {
         meeting_date: localDateString(new Date()),
         participants: [myPresence.nickname],
       })
-      .select("id")
+      .select("id, started_at")
       .single();
     if (error) throw error;
     meetingId = data.id;
+    applyMeetingStartedAt(data.started_at);
   } catch (err) {
     console.error("미팅 기록 생성 실패 (meetings 테이블이 없을 수 있어요)", err);
+  }
+}
+
+function applyMeetingStartedAt(startedAt) {
+  const ms = startedAt ? new Date(startedAt).getTime() : NaN;
+  if (!Number.isNaN(ms)) roomStartedAt = ms;
+}
+
+// host가 방을 새로고침/재접속할 때마다 새 기록을 만들면 미팅 시작 시각(경과 시간의 기준)이
+// 그때마다 초기화돼버린다. room_code로 진행 중인(ended_at이 없는) 기록이 이미 있으면 그걸
+// 그대로 이어서 쓰고, 정말 처음 만드는 경우에만 새로 생성한다.
+async function reuseOrCreateMeetingLog() {
+  try {
+    const { data: existing, error } = await supabaseClient
+      .from("meetings")
+      .select("id, started_at, ended_at")
+      .eq("room_code", roomCode)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (existing && !existing.ended_at) {
+      meetingId = existing.id;
+      applyMeetingStartedAt(existing.started_at);
+      return;
+    }
+  } catch (err) {
+    console.error("기존 미팅 기록 조회 실패, 새로 생성을 시도합니다", err);
+  }
+  await createMeetingLog();
+}
+
+// 참여자는 host의 Presence가 아니라 meetings 테이블에서 직접 방 이름/시작 시각을 가져온다.
+// host가 지금 이 순간 접속해있지 않아도(예: 다른 사람이 새로고침하는 사이) 항상 정확한
+// 값을 알 수 있게 하기 위함이다. (presence 기반 updateRoomName/updateMeetingId는 이 조회가
+// 실패했을 때를 대비한 보조 수단으로 계속 둔다.)
+async function loadMeetingInfoFromDb() {
+  try {
+    const { data, error } = await supabaseClient
+      .from("meetings")
+      .select("id, room_name, started_at")
+      .eq("room_code", roomCode)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return;
+    if (!meetingId) meetingId = data.id;
+    if (data.room_name) {
+      knownRoomName = data.room_name;
+      el.roomNameLabel.textContent = knownRoomName;
+    }
+    applyMeetingStartedAt(data.started_at);
+  } catch (err) {
+    console.error("미팅 정보(방 이름/시작 시각) 조회 실패 — presence로만 계속 시도합니다", err);
   }
 }
 
@@ -1444,7 +1493,6 @@ async function init() {
       removePeer(key);
       peerMeta.delete(key);
       recomputeSharer();
-      recomputeRoomStartedAt();
       renderParticipantList();
       markEndedIfEmpty();
       if (key !== clientId) playSound("leave");
@@ -1452,7 +1500,6 @@ async function init() {
     .on("presence", { event: "sync" }, () => {
       applyPresenceMeta();
       recomputeSharer();
-      recomputeRoomStartedAt();
       renderParticipantList();
       updateRoomName();
       updateMeetingId();
@@ -1472,13 +1519,14 @@ async function init() {
     .subscribe(async (status) => {
       if (status !== "SUBSCRIBED") return;
       if (isHost) {
-        await createMeetingLog();
+        await reuseOrCreateMeetingLog();
         myPresence.meetingId = meetingId;
         syncMeetingLog();
+      } else {
+        await loadMeetingInfoFromDb();
       }
       await trackPresence({});
       applyPresenceMeta();
-      recomputeRoomStartedAt();
       updateElapsedTime();
       setInterval(updateElapsedTime, 1000);
       setInterval(syncMeetingLog, MEETING_SYNC_INTERVAL_MS);
