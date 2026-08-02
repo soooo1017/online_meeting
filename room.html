@@ -76,8 +76,11 @@
             </div>
           </div>
         </div>
-        <div id="chat-messages" class="chat-messages">
-          <p class="chat-empty">아직 메시지가 없어요</p>
+        <div class="chat-messages-wrap">
+          <div id="chat-messages" class="chat-messages">
+            <p class="chat-empty">아직 메시지가 없어요</p>
+          </div>
+          <button type="button" id="btn-new-message" class="new-message-indicator hidden">↓ 새 메시지</button>
         </div>
         <form id="chat-form" class="chat-form">
           <textarea id="chat-input" rows="1" maxlength="500" placeholder="메시지 입력..."></textarea>

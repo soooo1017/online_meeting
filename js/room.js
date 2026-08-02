@@ -357,6 +357,7 @@ const el = {
   chatPanel: document.getElementById("chat-panel"),
   btnCloseChat: document.getElementById("btn-close-chat"),
   chatMessages: document.getElementById("chat-messages"),
+  btnNewMessage: document.getElementById("btn-new-message"),
   chatForm: document.getElementById("chat-form"),
   chatInput: document.getElementById("chat-input"),
   btnReaction: document.getElementById("btn-reaction"),
@@ -847,6 +848,7 @@ async function markEndedIfEmpty() {
   if (stillHere.length > 0) return;
   try {
     await supabaseClient.from("meetings").update({ ended_at: new Date().toISOString() }).eq("id", meetingId);
+    await deleteChatHistory(meetingId);
   } catch (err) {
     console.error("미팅 기록 종료 시각 저장 실패", err);
   }
@@ -923,6 +925,7 @@ function setupControls() {
     appendChatMessage(message, { mine: true });
     el.chatInput.value = "";
     resizeChatInput();
+    saveChatMessage(text);
   });
 
   // textarea라 Enter가 기본적으로 줄바꿈이라, Enter만 누르면 전송하고
@@ -1213,16 +1216,38 @@ function updateChatBadge() {
   el.chatBadge.classList.toggle("hidden", unreadChatCount === 0);
 }
 
-function appendChatMessage(message, { mine }) {
+// 스크롤이 바닥 근처(과거 메시지를 읽으려고 위로 올려둔 게 아닌 상태)인지 판단한다.
+const NEAR_BOTTOM_THRESHOLD_PX = 40;
+function isChatScrolledNearBottom() {
+  const el2 = el.chatMessages;
+  return el2.scrollHeight - el2.scrollTop - el2.clientHeight < NEAR_BOTTOM_THRESHOLD_PX;
+}
+
+function scrollChatToBottom() {
+  el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+  el.btnNewMessage.classList.add("hidden");
+}
+
+el.chatMessages.addEventListener("scroll", () => {
+  if (isChatScrolledNearBottom()) el.btnNewMessage.classList.add("hidden");
+});
+el.btnNewMessage.addEventListener("click", scrollChatToBottom);
+
+// isHistory: 방에 들어오면서 예전 대화를 한번에 불러오는 경우. 이때는 매번 스크롤을
+// 옮기거나 안 읽은 개수/미리보기/알림음을 울리면 안 되고, 다 불러온 뒤 한 번만 바닥으로
+// 이동시킨다(loadChatHistory에서 처리).
+function appendChatMessage(message, { mine, isHistory = false }) {
   const empty = el.chatMessages.querySelector(".chat-empty");
   if (empty) empty.remove();
+
+  const wasNearBottom = isChatScrolledNearBottom();
 
   const bubble = document.createElement("div");
   bubble.className = "chat-message" + (mine ? " mine" : "");
 
   const sender = document.createElement("span");
   sender.className = "sender";
-  sender.textContent = mine ? "나" : peerLabel(message.from);
+  sender.textContent = mine ? "나" : message.nickname || peerLabel(message.from);
   bubble.appendChild(sender);
 
   const text = document.createElement("span");
@@ -1231,13 +1256,79 @@ function appendChatMessage(message, { mine }) {
   bubble.appendChild(text);
 
   el.chatMessages.appendChild(bubble);
-  el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+
+  if (isHistory) return;
+
+  // 내가 보낸 메시지는 항상 바닥으로 따라가고, 남이 보낸 메시지는 이미 바닥 근처를 보고
+  // 있을 때만 따라간다 — 예전 메시지를 읽던 중이면 스크롤 위치를 그대로 두고 "새 메시지"
+  // 표시만 띄운다.
+  if (mine || wasNearBottom) {
+    scrollChatToBottom();
+  } else {
+    el.btnNewMessage.classList.remove("hidden");
+  }
 
   if (!mine && !chatOpen) {
     unreadChatCount += 1;
     updateChatBadge();
     showChatToastPreview(message);
     playSound("chat");
+  }
+}
+
+// ---- 채팅 기록 저장/불러오기 ----
+// 채팅은 "미팅이 진행되는 동안에는 누가 언제 들어오거나 새로고침해도 유지"되어야 하지만
+// 영구 보관 대상은 아니라서, meetings 테이블처럼 계속 남기지 않고 미팅이 끝나면
+// chat_messages에서 지운다 (markEndedIfEmpty / isRoomCodeExpired의 정리 로직에서 호출).
+
+async function saveChatMessage(text) {
+  if (!meetingId) return;
+  try {
+    const { error } = await supabaseClient.from("chat_messages").insert({
+      meeting_id: meetingId,
+      sender_client_id: clientId,
+      sender_nickname: myPresence.nickname,
+      text,
+    });
+    if (error) throw error;
+  } catch (err) {
+    console.error("채팅 기록 저장 실패 (chat_messages 테이블이 없을 수 있어요)", err);
+  }
+}
+
+async function loadChatHistory() {
+  if (!meetingId) return;
+  try {
+    const { data, error } = await supabaseClient
+      .from("chat_messages")
+      .select("sender_client_id, sender_nickname, text, created_at")
+      .eq("meeting_id", meetingId)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    (data || []).forEach((row) => {
+      appendChatMessage(
+        {
+          from: row.sender_client_id,
+          text: row.text,
+          ts: new Date(row.created_at).getTime(),
+          nickname: row.sender_nickname,
+        },
+        { mine: row.sender_client_id === clientId, isHistory: true },
+      );
+    });
+    scrollChatToBottom();
+  } catch (err) {
+    console.error("채팅 기록 불러오기 실패", err);
+  }
+}
+
+async function deleteChatHistory(id) {
+  if (!id) return;
+  try {
+    const { error } = await supabaseClient.from("chat_messages").delete().eq("meeting_id", id);
+    if (error) throw error;
+  } catch (err) {
+    console.error("채팅 기록 삭제 실패", err);
   }
 }
 
@@ -1350,6 +1441,7 @@ async function isRoomCodeExpired() {
     if (staleMs > MEETING_STALE_MS) {
       try {
         await supabaseClient.from("meetings").update({ ended_at: data.last_active_at }).eq("id", data.id);
+        await deleteChatHistory(data.id);
       } catch (err) {
         console.error("멈춰있던 미팅 기록 종료 처리 실패", err);
       }
@@ -1573,6 +1665,7 @@ async function init() {
       } else {
         await loadMeetingInfoFromDb();
       }
+      await loadChatHistory();
       await trackPresence({});
       applyPresenceMeta();
       updateElapsedTime();
