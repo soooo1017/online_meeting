@@ -854,11 +854,25 @@ async function handleSignal(payload) {
   const { pc } = getOrCreatePeer(from);
 
   if (type === "offer") {
+    // sendSignal의 ack 확인이 (전송 자체는 성공했는데) 응답만 유실되는 등의 이유로
+    // 실패로 잘못 판단되면, 이미 처리해서 답까지 보낸 offer가 재시도로 한 번 더
+    // 도착할 수 있다. 그대로 다시 처리하면 이미 연결된 상태에서 불필요한 재협상이
+    // 시작되어 순간적으로 오디오/영상이 끊기거나 늦어지는 원인이 된다 — 이미 같은
+    // offer를 처리해서 stable 상태인 경우 조용히 무시한다.
+    const isDuplicateOffer =
+      pc.signalingState === "stable" &&
+      pc.currentRemoteDescription &&
+      pc.currentRemoteDescription.sdp === payload.sdp.sdp;
+    if (isDuplicateOffer) return;
     await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     sendSignal(from, { type: "answer", sdp: answer });
   } else if (type === "answer") {
+    // 위와 같은 이유로 이미 처리된 answer가 재시도로 중복 도착할 수 있다. 이 시점에
+    // 남겨둔 offer가 없으면(=이미 협상이 끝난 상태) 적용할 수 없고 적용을 시도하면
+    // 에러만 나므로 무시한다.
+    if (pc.signalingState !== "have-local-offer") return;
     await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
   } else if (type === "ice-candidate") {
     try {
