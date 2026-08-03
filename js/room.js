@@ -31,6 +31,13 @@ const RECONNECT_GRACE_MS = 5000; // "disconnected" 상태가 이 시간 넘게 �
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const MEETING_SYNC_INTERVAL_MS = 20000; // 진행 중인 미팅 기록을 이 주기로 계속 동기화
 const MEETING_STALE_MS = 90000; // last_active_at이 이만큼 안 갱신되면 비정상 종료로 간주 (동기화 주기의 4~5배)
+// Presence(Phoenix Presence 기반)는 같은 사람이 트래킹 정보를 다시 보내기만 해도
+// (마이크/캠/손들기/화면공유 상태 변경 등 trackPresence 호출) 내부적으로 leave+join이
+// 쌍으로 발생한다 — 진짜로 나간 게 아니라 "상태가 갱신됐다"는 뜻일 뿐인데, 이걸 그대로
+// 처리하면 상태 하나 바꿀 때마다 상대방 화면에서 그 사람 영상이 사라졌다가 다시 연결되는
+// 것처럼 보인다. leave 이벤트를 곧바로 믿지 않고 이 시간만큼 기다렸다가, 그때도 여전히
+// presence에 없을 때만 "진짜로 나갔다"고 판단한다.
+const LEAVE_CONFIRM_DELAY_MS = 800;
 
 const clientId = crypto.randomUUID();
 const peers = new Map(); // peerId -> { pc: RTCPeerConnection }
@@ -475,7 +482,24 @@ function addVideoTile(peerId, stream, { local }) {
     tag.className = "tag";
     // presence 정보가 ontrack보다 먼저 도착했을 수도 있으니, 이미 알고 있는 닉네임이 있으면 바로 반영한다.
     const knownMeta = peerMeta.get(peerId);
-    tag.textContent = local ? "나" : (knownMeta && knownMeta.nickname) || defaultLabel(peerId);
+    const knownNickname = local ? "나" : (knownMeta && knownMeta.nickname) || defaultLabel(peerId);
+    tag.textContent = knownNickname;
+
+    // 캠이 꺼진 상대는 (네트워크상으론 새 프레임이 안 와서) 화면이 멈춘 것처럼 보일 수
+    // 있어서, 그 대신 이 오버레이로 깔끔하게 덮어준다. 보이고 숨기는 건 presence의
+    // camOn 값에 따라 applyPresenceMeta에서 처리한다(로컬 타일도 이 함수를 거친다).
+    const camOffOverlay = document.createElement("div");
+    camOffOverlay.className = "cam-off-overlay hidden";
+    const camOffAvatar = document.createElement("div");
+    camOffAvatar.className = "cam-off-avatar";
+    camOffAvatar.innerHTML =
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>';
+    const camOffName = document.createElement("span");
+    camOffName.className = "cam-off-name";
+    camOffName.textContent = knownNickname;
+    camOffOverlay.appendChild(camOffAvatar);
+    camOffOverlay.appendChild(camOffName);
+    if (knownMeta && knownMeta.camOn === false) camOffOverlay.classList.remove("hidden");
 
     const indicators = document.createElement("div");
     indicators.className = "tile-indicators";
@@ -489,6 +513,7 @@ function addVideoTile(peerId, stream, { local }) {
     indicators.appendChild(handIndicator);
 
     tile.appendChild(video);
+    tile.appendChild(camOffOverlay);
     tile.appendChild(tag);
     tile.appendChild(indicators);
     el.tileRow.appendChild(tile);
@@ -555,6 +580,10 @@ function applyPresenceMeta() {
     if (micIndicator) micIndicator.classList.toggle("hidden", meta.micOn !== false);
     const handIndicator = tile.querySelector(".hand-indicator");
     if (handIndicator) handIndicator.classList.toggle("hidden", !meta.handRaised);
+    const camOffOverlay = tile.querySelector(".cam-off-overlay");
+    if (camOffOverlay) camOffOverlay.classList.toggle("hidden", meta.camOn !== false);
+    const camOffName = tile.querySelector(".cam-off-name");
+    if (camOffName) camOffName.textContent = key === clientId ? "나" : meta.nickname || defaultLabel(key);
   }
 }
 
@@ -1688,18 +1717,28 @@ async function init() {
 
   channel
     .on("presence", { event: "join" }, ({ key }) => {
-      if (key !== clientId) {
-        connectToPeer(key);
-        playSound("join");
-      }
+      if (key === clientId) return;
+      // 이미 연결되어 있는 사람이면(peers에 있으면) 이건 진짜 입장이 아니라 그 사람이
+      // 상태만 갱신하면서 같이 딸려온 join일 뿐이다 — 다시 연결 시도하거나 입장음을
+      // 울릴 필요가 없다 (connectToPeer 자체도 이미 연결된 경우 아무 일도 안 하지만,
+      // 입장 알림음까지 매번 울리면 안 되므로 여기서 한 번 더 구분한다).
+      const isNewPeer = !peers.has(key);
+      connectToPeer(key);
+      if (isNewPeer) playSound("join");
     })
     .on("presence", { event: "leave" }, ({ key }) => {
-      removePeer(key);
-      peerMeta.delete(key);
-      recomputeSharer();
-      renderParticipantList();
-      markEndedIfEmpty();
-      if (key !== clientId) playSound("leave");
+      if (key === clientId) return;
+      setTimeout(() => {
+        // 그 사이 다시 presence에 나타났다면(=상태만 갱신한 leave+join 쌍) 진짜로 나간
+        // 게 아니므로 연결을 끊지 않는다.
+        if (channel && channel.presenceState()[key]) return;
+        removePeer(key);
+        peerMeta.delete(key);
+        recomputeSharer();
+        renderParticipantList();
+        markEndedIfEmpty();
+        playSound("leave");
+      }, LEAVE_CONFIRM_DELAY_MS);
     })
     .on("presence", { event: "sync" }, () => {
       applyPresenceMeta();

@@ -459,6 +459,61 @@ input[type="text"]:focus {
   border-top-color: #fff;
 }
 
+/* 캠이 꺼진 사람은 (프레임 전송이 끊겨 화면이 멈춘 것처럼 보이는 대신) 이 오버레이로
+   덮어서 깔끔한 검은 화면 + 사람 아이콘 + 닉네임으로 보여준다. */
+.cam-off-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #000;
+}
+
+.cam-off-overlay.hidden {
+  display: none;
+}
+
+.cam-off-avatar {
+  width: 40%;
+  max-width: 96px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cam-off-avatar svg {
+  width: 62%;
+  height: 62%;
+  fill: none;
+  stroke: #9a9a9a;
+  stroke-width: 1.6;
+}
+
+.cam-off-avatar svg circle {
+  fill: #9a9a9a;
+  stroke: none;
+}
+
+.cam-off-avatar svg path {
+  fill: #9a9a9a;
+  stroke: none;
+}
+
+.cam-off-name {
+  color: #ddd;
+  font-size: 0.8rem;
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .video-tile video {
   width: 100%;
   height: 100%;
