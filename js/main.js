@@ -161,13 +161,12 @@ document.getElementById("form-creator-code").addEventListener("submit", async (e
   submitBtn.disabled = true;
 
   try {
-    const { data, error } = await supabaseClient
-      .from("creator_codes")
-      .select("id")
-      .eq("code", code)
-      .maybeSingle();
+    // creator_codes 테이블은 익명 키로 직접 select할 수 없다(코드 목록이 통째로
+    // 새어나가는 걸 막기 위함) — 대신 코드가 맞는지만 true/false로 알려주는
+    // RPC 함수를 거친다.
+    const { data: isValid, error } = await supabaseClient.rpc("verify_creator_code", { p_code: code });
     if (error) throw error;
-    if (!data) {
+    if (!isValid) {
       errorEl.textContent = "코드가 올바르지 않아요. 다시 확인해주세요.";
       return;
     }
@@ -239,9 +238,10 @@ document.getElementById("form-join").addEventListener("submit", async (e) => {
   submitBtn.disabled = true;
 
   try {
-    // 이 방에 비밀번호가 걸려있는지 확인한다. 실제 비밀번호 값은 여기서 select하지
-    // 않고, room_code+password가 둘 다 일치하는지만 별도로 물어본다 (틀려도 진짜
-    // 값은 알 수 없음 — creator_codes와 동일한 방식).
+    // 이 방에 비밀번호가 걸려있는지 확인한다. has_password는 select 가능한 컬럼이라
+    // 직접 조회해도 되지만, 실제 password 컬럼은 익명 키로 select 자체가 막혀있어서
+    // (컬럼 단위 권한) 일치 여부는 아래 RPC 함수로만 확인할 수 있다 — 틀려도 진짜
+    // 비밀번호 값은 알 수 없음 (creator_codes와 동일한 방식).
     const { data, error } = await supabaseClient
       .from("meetings")
       .select("has_password")
@@ -257,15 +257,12 @@ document.getElementById("form-join").addEventListener("submit", async (e) => {
         errorEl.textContent = "비밀번호가 필요한 방이에요.";
         return;
       }
-      const { data: matched, error: matchError } = await supabaseClient
-        .from("meetings")
-        .select("id")
-        .eq("room_code", code)
-        .eq("password", password)
-        .is("ended_at", null)
-        .maybeSingle();
+      const { data: isMatch, error: matchError } = await supabaseClient.rpc("verify_room_password", {
+        p_room_code: code,
+        p_password: password,
+      });
       if (matchError) throw matchError;
-      if (!matched) {
+      if (!isMatch) {
         errorEl.textContent = "비밀번호가 일치하지 않아요.";
         return;
       }

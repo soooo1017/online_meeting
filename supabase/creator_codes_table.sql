@@ -26,10 +26,30 @@ create table if not exists creator_codes (
 
 alter table creator_codes enable row level security;
 
--- 코드가 맞는지 확인하려면 조회는 되어야 하니 select만 열어둡니다. 코드 추가/삭제는
--- Supabase 대시보드(관리자만 접근 가능)에서 하므로 익명 키에는 insert/update/delete
--- 권한을 주지 않습니다.
+-- 예전에는 "select만 열어두고 code로 필터링해서 조회"하는 방식이었는데, 이러면
+-- 익명 키만 있으면(웹사이트를 한 번이라도 방문했다면 누구나 가진) REST API로
+-- creator_codes 테이블에 직접 select=code 요청을 보내 코드 전체 목록을 그대로
+-- 가져갈 수 있었습니다 — "방 만들기" 게이트가 사실상 무력화되는 문제였습니다.
+-- 이제는 익명 키로는 이 테이블을 아예 직접 조회할 수 없게 select 정책을 두지
+-- 않고(= 기본적으로 전부 거부), 코드가 맞는지 확인하는 건 아래
+-- verify_creator_code 함수 하나만 거치도록 합니다. 코드 추가/삭제는 여전히
+-- Supabase 대시보드(관리자만 접근 가능)에서 하므로 insert/update/delete 정책도 없습니다.
 drop policy if exists "anyone can select creator_codes" on creator_codes;
-create policy "anyone can select creator_codes" on creator_codes
-  for select
-  using (true);
+
+-- security definer로 만들어서, 이 함수를 만든 소유자(postgres, 즉 creator_codes의
+-- 테이블 소유자와 동일)의 권한으로 실행됩니다 — RLS를 우회해 테이블을 직접 볼 수
+-- 있지만, 바깥으로는 "코드가 존재하는지(true/false)"만 돌려주고 실제 코드 목록이나
+-- label 같은 값은 절대 내보내지 않습니다.
+create or replace function public.verify_creator_code(p_code text)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from creator_codes where code = p_code
+  );
+$$;
+
+revoke all on function public.verify_creator_code(text) from public;
+grant execute on function public.verify_creator_code(text) to anon, authenticated;
