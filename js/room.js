@@ -776,7 +776,9 @@ function getActiveVideoTrack() {
 
 function createPeerConnection(peerId) {
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-  pc.addTrack(getActiveVideoTrack(), localStream);
+  // 캠 없이(오디오만) 참여한 경우 보낼 영상 트랙 자체가 없다.
+  const videoTrack = getActiveVideoTrack();
+  if (videoTrack) pc.addTrack(videoTrack, localStream);
   localStream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
 
   pc.onicecandidate = (event) => {
@@ -1695,8 +1697,39 @@ async function init() {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   } catch (err) {
-    showError(mediaErrorMessage(err));
-    return;
+    // 캠 쪽 문제(기기가 아예 없거나, 권한이 막혀있거나, 다른 프로그램이 쓰고 있는 등)일
+    // 수도 있으니 마이크만으로 다시 시도해본다 — 이때도 안 되면 정말 입장이 불가능한
+    // 상황(마이크까지 없음/차단됨)이라고 보고 그대로 막는다.
+    let audioOnlyStream;
+    try {
+      audioOnlyStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+    } catch (audioErr) {
+      showError(mediaErrorMessage(audioErr));
+      return;
+    }
+    const wantsAudioOnly = window.confirm("카메라를 사용할 수 없어요.\n마이크만으로 미팅에 참여하시겠어요?");
+    if (!wantsAudioOnly) {
+      audioOnlyStream.getTracks().forEach((track) => track.stop());
+      showError(mediaErrorMessage(err));
+      return;
+    }
+    localStream = audioOnlyStream;
+    camOn = false;
+    myPresence.camOn = false;
+  }
+
+  // 캠 없이(오디오만) 들어온 경우, 애초에 보낼 캠 트랙 자체가 없어서 캠 켜기/끄기와
+  // 화면 공유(화면 공유는 상대방 연결에 "영상 보내는 자리"가 없으면 조용히 전달이
+  // 안 되는 문제가 있음)는 이 세션 동안 의미가 없다 — 버튼을 아예 막아서 헷갈리지 않게 한다.
+  if (localStream.getVideoTracks().length === 0) {
+    el.btnToggleCam.disabled = true;
+    el.btnToggleCam.title = "카메라 없이 참여 중이에요";
+    el.btnToggleCam.classList.add("off");
+    el.btnToggleCam.textContent = "🚫";
+    if (screenShareSupported) {
+      el.btnScreenShare.disabled = true;
+      el.btnScreenShare.title = "카메라 없이 참여 중에는 화면 공유를 지원하지 않아요";
+    }
   }
 
   // 방 화면은 아직 안 보여준다 — 채널 연결/기존 참가자와의 협상까지 끝난 뒤에 한번에
