@@ -417,6 +417,24 @@ function mediaErrorMessage(err) {
   }
 }
 
+// 마이크만으로 입장한 뒤 나중에 캠을 켜려고 다시 권한을 요청했을 때 실패 이유별 안내.
+// 이 시점엔 마이크는 이미 연결되어 있으므로 mediaErrorMessage와 달리 캠 얘기만 한다.
+function cameraOnlyErrorMessage(err) {
+  switch (err.name) {
+    case "NotAllowedError":
+    case "PermissionDeniedError":
+      return "카메라 권한이 차단되어 있어요.\n주소창 왼쪽의 자물쇠(또는 카메라) 아이콘을 눌러 카메라 권한을 '허용'으로 바꾼 뒤 다시 시도해주세요.";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+      return "카메라가 연결되어 있지 않아요.\n카메라가 제대로 연결되어 있는지 확인한 뒤 다시 시도해주세요.";
+    case "NotReadableError":
+    case "TrackStartError":
+      return "다른 프로그램이 카메라를 사용 중인 것 같아요.\n다른 화상회의 앱을 종료하고 다시 시도해주세요.";
+    default:
+      return "카메라를 켜지 못했어요.\n잠시 후 다시 시도해주세요.";
+  }
+}
+
 function showState(name) {
   el.loading.classList.toggle("hidden", name !== "loading");
   el.error.classList.toggle("hidden", name !== "error");
@@ -816,6 +834,59 @@ function createPeerConnection(peerId) {
   return pc;
 }
 
+// 이미 맺어진 연결에 트랙을 추가/변경한 뒤(예: 마이크만 있다가 캠을 새로 켠 경우)
+// 상대방에게도 그 사실이 전달되도록 offer를 다시 만들어 보낸다(재협상). 이미 다른
+// 협상이 진행 중이면(stable이 아니면) 건드리지 않는다 — 흔치 않은 상황이라 굳이
+// 대기열까지 만들지 않고, 다음에 안정된 상태에서 다시 시도하는 쪽이 더 안전하다.
+async function renegotiatePeer(pc, peerId) {
+  if (pc.signalingState !== "stable") return;
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    sendSignal(peerId, { type: "offer", sdp: offer });
+  } catch (err) {
+    console.error(`재협상 실패 (peer ${peerId.slice(0, 4)})`, err);
+  }
+}
+
+// 마이크만으로 입장한 뒤, 나중에 캠을 켜고 싶을 때(기기를 새로 연결했거나 마음이
+// 바뀐 경우) 캠 권한을 다시 요청한다. 허용되면 로컬 화면/이미 맺어진 모든 연결에
+// 캠 트랙을 추가하고, 거부되거나 캠이 여전히 없으면 이유별 안내만 띄우고 계속
+// 마이크만으로 남는다(입장 자체는 막지 않음).
+async function requestCameraMidCall() {
+  el.btnToggleCam.disabled = true;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  } catch (err) {
+    showToast(cameraOnlyErrorMessage(err));
+    el.btnToggleCam.disabled = false;
+    return;
+  }
+
+  const videoTrack = stream.getVideoTracks()[0];
+  localStream.addTrack(videoTrack);
+  camOn = true;
+  myPresence.camOn = true;
+
+  peers.forEach(({ pc }, peerId) => {
+    pc.addTrack(videoTrack, localStream);
+    renegotiatePeer(pc, peerId);
+  });
+
+  el.btnToggleCam.disabled = false;
+  el.btnToggleCam.classList.remove("off");
+  el.btnToggleCam.textContent = "📷";
+  trackPresence({ camOn: true });
+
+  // 화면 공유는 캠 트랙이 없어 상대방 연결에 "영상 보내는 자리" 자체가 없던 동안 막아뒀던
+  // 것이라, 이제 그 자리가 생겼으니 다시 열어준다.
+  if (screenShareSupported) {
+    el.btnScreenShare.disabled = false;
+    el.btnScreenShare.title = "화면 공유";
+  }
+}
+
 // 연결이 끊어지면 기존 연결을 정리하고, 상대가 아직 방(Presence)에 남아있으면 재연결을 시도한다.
 // 상대방에게도 "reconnect-request"를 보내서 자기 쪽 연결도 같이 버리고 새로 만들게 한다 —
 // 나만 새 연결을 준비하고 상대는 예전(멈춰버린) 연결을 그대로 들고 있으면 서로 안 맞아서
@@ -965,6 +1036,12 @@ function setupControls() {
   });
 
   el.btnToggleCam.addEventListener("click", () => {
+    // 캠 없이(오디오만) 입장한 상태라 보낼 캠 트랙 자체가 없으면, 단순 on/off가 아니라
+    // 캠 권한을 다시 요청하는 것부터 해야 한다.
+    if (localStream.getVideoTracks().length === 0) {
+      requestCameraMidCall();
+      return;
+    }
     camOn = !camOn;
     localStream.getVideoTracks().forEach((track) => (track.enabled = camOn));
     el.btnToggleCam.classList.toggle("off", !camOn);
@@ -1718,17 +1795,17 @@ async function init() {
     myPresence.camOn = false;
   }
 
-  // 캠 없이(오디오만) 들어온 경우, 애초에 보낼 캠 트랙 자체가 없어서 캠 켜기/끄기와
-  // 화면 공유(화면 공유는 상대방 연결에 "영상 보내는 자리"가 없으면 조용히 전달이
-  // 안 되는 문제가 있음)는 이 세션 동안 의미가 없다 — 버튼을 아예 막아서 헷갈리지 않게 한다.
+  // 캠 없이(오디오만) 들어온 경우, 지금은 보낼 캠 트랙이 없어서 꺼짐 상태로 표시한다.
+  // 버튼 자체는 막지 않는다 — 나중에 캠을 연결하거나 권한을 허용하고 다시 켜고 싶을 수
+  // 있으므로, 클릭하면 requestCameraMidCall()이 다시 권한을 요청한다. 화면 공유는
+  // 지금 이 순간 상대방 연결에 "영상 보내는 자리" 자체가 없어 시도해도 조용히 전달이
+  // 안 되는 문제가 있어 캠이 생기기 전까지만 막아둔다(캠이 켜지면 다시 열어줌).
   if (localStream.getVideoTracks().length === 0) {
-    el.btnToggleCam.disabled = true;
-    el.btnToggleCam.title = "카메라 없이 참여 중이에요";
     el.btnToggleCam.classList.add("off");
     el.btnToggleCam.textContent = "🚫";
     if (screenShareSupported) {
       el.btnScreenShare.disabled = true;
-      el.btnScreenShare.title = "카메라 없이 참여 중에는 화면 공유를 지원하지 않아요";
+      el.btnScreenShare.title = "카메라가 없어서 화면 공유를 쓸 수 없어요 (캠을 켜면 다시 가능해져요)";
     }
   }
 
