@@ -697,7 +697,10 @@ async function startScreenShare() {
 
   let stream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    // audio: true는 "탭/시스템 소리도 같이 공유할지" 선택지를 브라우저 공유 창에
+    // 띄워달라는 요청이다(Chrome 기준, 이 옵션이 없으면 그 체크박스 자체가 안 뜬다).
+    // 소스에 따라 오디오가 없을 수도 있고, 그때는 아래에서 그냥 video만 다룬다.
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
   } catch (err) {
     showToast(displayMediaErrorMessage(err));
     return;
@@ -712,6 +715,7 @@ async function startScreenShare() {
 
   try {
     localScreenStream = stream;
+    const screenAudioTrack = stream.getAudioTracks()[0];
     const startedAt = Date.now();
     screenTrack.onended = () => {
       // 화면 공유 권한이 시스템 단에서 막혀 있으면 선택 직후 트랙이 바로 끊기기도 한다.
@@ -721,10 +725,32 @@ async function startScreenShare() {
       stopScreenShare();
     };
 
-    peers.forEach(({ pc }) => {
-      const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
-      if (sender) sender.replaceTrack(screenTrack);
-    });
+    // replaceTrack/addTrack은 Promise를 반환한다 — await 없이 그냥 호출하면 특정
+    // 상대방과의 교체가 실패해도(연결이 막 끊기는 시점과 겹치는 등) 아무도 모르게
+    // 콘솔에만 남고 그 사람 화면만 조용히 안 바뀐 채로 남는다. 한 명의 실패가 나머지
+    // 전체를 막지는 않게 Promise.allSettled로 각자 결과를 기다리고 실패만 기록한다.
+    await Promise.allSettled(
+      Array.from(peers.entries()).map(async ([peerId, { pc }]) => {
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+        if (sender) {
+          try {
+            await sender.replaceTrack(screenTrack);
+          } catch (err) {
+            console.error(`화면 영상 트랙 교체 실패 (peer ${peerId.slice(0, 4)})`, err);
+          }
+        }
+        // 화면과 함께 선택한 소리(탭/시스템 오디오)가 있으면, 마이크와는 별개의
+        // 추가 오디오 트랙으로 보낸다(마이크를 대체하는 게 아니라 같이 감).
+        if (screenAudioTrack) {
+          try {
+            pc.addTrack(screenAudioTrack, stream);
+            await renegotiatePeer(pc, peerId);
+          } catch (err) {
+            console.error(`화면 오디오 트랙 추가 실패 (peer ${peerId.slice(0, 4)})`, err);
+          }
+        }
+      }),
+    );
 
     isSharingScreen = true;
     el.btnScreenShare.classList.add("active");
@@ -745,16 +771,39 @@ async function stopScreenShare() {
   isSharingScreen = false;
   el.btnScreenShare.classList.remove("active");
 
+  // localScreenStream을 정지/해제하기 전에, 상대방 연결에서 그 오디오 트랙의 sender를
+  // 찾아 제거할 수 있도록 참조를 먼저 기억해둔다(정지해도 트랙 객체 자체는 동일하다).
+  const screenAudioTrack = localScreenStream ? localScreenStream.getAudioTracks()[0] : null;
+
   if (localScreenStream) {
     localScreenStream.getTracks().forEach((track) => track.stop());
     localScreenStream = null;
   }
 
   const camTrack = localStream.getVideoTracks()[0];
-  peers.forEach(({ pc }) => {
-    const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
-    if (sender && camTrack) sender.replaceTrack(camTrack);
-  });
+  await Promise.allSettled(
+    Array.from(peers.entries()).map(async ([peerId, { pc }]) => {
+      const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+      if (sender && camTrack) {
+        try {
+          await sender.replaceTrack(camTrack);
+        } catch (err) {
+          console.error(`캠 영상 트랙 복귀 실패 (peer ${peerId.slice(0, 4)})`, err);
+        }
+      }
+      if (screenAudioTrack) {
+        const audioSender = pc.getSenders().find((s) => s.track === screenAudioTrack);
+        if (audioSender) {
+          try {
+            pc.removeTrack(audioSender);
+            await renegotiatePeer(pc, peerId);
+          } catch (err) {
+            console.error(`화면 오디오 트랙 제거 실패 (peer ${peerId.slice(0, 4)})`, err);
+          }
+        }
+      }
+    }),
+  );
 
   if (channel) await trackPresence({ sharing: false });
   recomputeSharer();
@@ -798,6 +847,12 @@ function createPeerConnection(peerId) {
   const videoTrack = getActiveVideoTrack();
   if (videoTrack) pc.addTrack(videoTrack, localStream);
   localStream.getAudioTracks().forEach((track) => pc.addTrack(track, localStream));
+  // 화면 공유 중(오디오 포함)에 새로 맺어지는 연결이면, 처음 offer/answer 때부터
+  // 화면 소리도 함께 보내도록 추가한다 — 이 경우는 첫 협상에 포함되니 재협상이 따로 필요 없다.
+  if (isSharingScreen && localScreenStream) {
+    const screenAudioTrack = localScreenStream.getAudioTracks()[0];
+    if (screenAudioTrack) pc.addTrack(screenAudioTrack, localScreenStream);
+  }
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
