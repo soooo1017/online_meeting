@@ -1315,6 +1315,13 @@ function positionReactionPicker() {
 }
 
 function buildReactionPicker() {
+  // 일부 모바일 브라우저(특히 iOS Safari)는 position:fixed 자손이 overflow-x:auto인
+  // 조상(.controls) 안에 있으면 뷰포트가 아니라 그 조상을 기준으로 좌표/클리핑을
+  // 처리해버려서, JS가 계산한 좌표와 실제 화면 위치가 어긋나 캠 영역에 가려 안 보이는
+  // 현상이 있었다(데스크톱 Chrome에서는 재현되지 않아 놓치기 쉬움). 애초에 .controls의
+  // DOM 트리 밖(body 바로 아래)으로 옮겨서 그 조상의 영향 자체를 받지 않게 한다.
+  document.body.appendChild(el.reactionPicker);
+
   REACTION_EMOJIS.forEach((emoji) => {
     const btn = document.createElement("button");
     btn.type = "button";
