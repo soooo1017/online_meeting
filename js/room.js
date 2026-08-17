@@ -389,6 +389,14 @@ const el = {
   soundSettingsPopover: document.getElementById("sound-settings-popover"),
   soundMasterToggle: document.getElementById("sound-master-toggle"),
   soundSettingsList: document.getElementById("sound-settings-list"),
+  btnTakePhoto: document.getElementById("btn-take-photo"),
+  photoConsentModal: document.getElementById("photo-consent-modal"),
+  photoConsentText: document.getElementById("photo-consent-text"),
+  btnPhotoConsentYes: document.getElementById("btn-photo-consent-yes"),
+  btnPhotoConsentNo: document.getElementById("btn-photo-consent-no"),
+  photoCountdownOverlay: document.getElementById("photo-countdown-overlay"),
+  photoCountdownNumber: document.getElementById("photo-countdown-number"),
+  photoFlash: document.getElementById("photo-flash"),
 };
 
 let toastTimer = null;
@@ -1199,6 +1207,10 @@ function setupControls() {
     }
   });
 
+  el.btnTakePhoto.addEventListener("click", startPhotoRequest);
+  el.btnPhotoConsentYes.addEventListener("click", () => respondToPhotoConsent(true));
+  el.btnPhotoConsentNo.addEventListener("click", () => respondToPhotoConsent(false));
+
   buildSoundSettings();
   el.btnSoundSettings.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1343,6 +1355,271 @@ function showFloatingReaction(peerId, emoji) {
   span.textContent = emoji;
   span.addEventListener("animationend", () => span.remove());
   tile.appendChild(span);
+}
+
+// ---- 단체 사진 찍기 ----
+// 캠이 꺼져있는 사람에게도 동의를 구한다(동의 후 촬영 전에 캠을 켤 수도 있으니까) —
+// 실제 캠 상태는 촬영 순간(카운트다운이 끝나는 시점)에 그때그때 다시 확인한다.
+const PHOTO_CONSENT_TIMEOUT_MS = 15000;
+const PHOTO_COUNTDOWN_SECONDS = 3;
+let photoRequestState = null; // { initiatorId, consents: Map<peerId, boolean|null>, timeoutId } | null
+
+function startPhotoRequest() {
+  if (photoRequestState) return;
+  const others = Object.keys(channel.presenceState()).filter((key) => key !== clientId);
+  if (others.length === 0) {
+    showToast("같이 있는 참가자가 없어요.");
+    return;
+  }
+  photoRequestState = {
+    initiatorId: clientId,
+    consents: new Map(others.map((id) => [id, null])),
+    timeoutId: setTimeout(() => {
+      if (photoRequestState && photoRequestState.initiatorId === clientId) {
+        cancelPhotoRequest("일부 참가자가 응답하지 않아 촬영이 취소됐어요.");
+      }
+    }, PHOTO_CONSENT_TIMEOUT_MS),
+  };
+  el.btnTakePhoto.disabled = true;
+  showToast("참가자들에게 단체 사진 동의를 요청했어요...");
+  channel.send({ type: "broadcast", event: "photo-request", payload: { from: clientId } });
+}
+
+// 요청을 취소한다 — 이 함수를 호출한 쪽이 발신자(본인)일 때만 다른 사람들에게도 취소를 알린다.
+function cancelPhotoRequest(reasonForInitiator) {
+  if (!photoRequestState) return;
+  const wasInitiator = photoRequestState.initiatorId === clientId;
+  clearTimeout(photoRequestState.timeoutId);
+  photoRequestState = null;
+  el.btnTakePhoto.disabled = false;
+  hidePhotoConsentPrompt();
+  hidePhotoCountdown();
+  if (wasInitiator) {
+    channel.send({ type: "broadcast", event: "photo-cancelled", payload: { from: clientId } });
+    if (reasonForInitiator) showToast(reasonForInitiator);
+  }
+}
+
+function showPhotoConsentPrompt(fromId) {
+  el.photoConsentText.textContent = `${peerLabel(fromId)}님이 단체 사진을 찍으려고 해요.\n동의하시겠어요? (캠이 꺼져있어도 촬영 전에 켜실 수 있어요)`;
+  el.photoConsentModal.dataset.requesterId = fromId;
+  el.photoConsentModal.classList.remove("hidden");
+}
+
+function hidePhotoConsentPrompt() {
+  el.photoConsentModal.classList.add("hidden");
+}
+
+function respondToPhotoConsent(agree) {
+  const requesterId = el.photoConsentModal.dataset.requesterId;
+  hidePhotoConsentPrompt();
+  if (!requesterId) return;
+  channel.send({
+    type: "broadcast",
+    event: "photo-consent",
+    payload: { from: clientId, to: requesterId, agree },
+  });
+  if (agree) showToast("동의했어요. 잠시 후 촬영이 시작될 수 있어요.");
+}
+
+// 발신자(본인) 쪽에서만 호출된다 — 각 상대의 응답을 모아서 전원 동의하면 카운트다운을 시작한다.
+function handlePhotoConsentResponse(fromId, agree) {
+  if (!photoRequestState || photoRequestState.initiatorId !== clientId) return;
+  if (!photoRequestState.consents.has(fromId)) return; // 요청 이후 새로 들어온 사람 등은 이번 판에서 제외
+  photoRequestState.consents.set(fromId, agree);
+
+  if (!agree) {
+    cancelPhotoRequest(`${peerLabel(fromId)}님이 동의하지 않아 촬영이 취소됐어요.`);
+    return;
+  }
+
+  const everyoneAgreed = Array.from(photoRequestState.consents.values()).every((v) => v === true);
+  if (everyoneAgreed) {
+    clearTimeout(photoRequestState.timeoutId);
+    channel.send({ type: "broadcast", event: "photo-countdown", payload: { from: clientId } });
+    beginPhotoCountdown(true);
+  }
+}
+
+// isInitiator가 true인 쪽만 카운트다운이 끝난 뒤 실제로 사진을 합성/저장한다.
+// 나머지는 화면에 3-2-1을 같이 보여주기만 한다(찍히는 사람들이 준비할 수 있도록).
+function beginPhotoCountdown(isInitiator) {
+  hidePhotoConsentPrompt();
+  let n = PHOTO_COUNTDOWN_SECONDS;
+  el.photoCountdownOverlay.classList.remove("hidden");
+  el.photoCountdownNumber.textContent = String(n);
+  const tick = setInterval(() => {
+    n -= 1;
+    if (n > 0) {
+      el.photoCountdownNumber.textContent = String(n);
+      return;
+    }
+    clearInterval(tick);
+    el.photoCountdownNumber.textContent = "찰칵!";
+    flashScreen();
+    setTimeout(() => {
+      hidePhotoCountdown();
+      if (isInitiator) {
+        capturePhoto();
+        photoRequestState = null;
+        el.btnTakePhoto.disabled = false;
+      }
+    }, 500);
+  }, 1000);
+}
+
+function hidePhotoCountdown() {
+  el.photoCountdownOverlay.classList.add("hidden");
+}
+
+function flashScreen() {
+  el.photoFlash.classList.add("flash-active");
+  setTimeout(() => el.photoFlash.classList.remove("flash-active"), 250);
+}
+
+// object-fit:contain과 동일한 비율로 video 프레임을 그린다. mirror가 true면 로컬
+// 미리보기 화면과 동일하게 좌우반전해서 그린다. 프레임을 그릴 수 없으면 false를 반환한다.
+function drawVideoContain(ctx, video, x, y, w, h, mirror) {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return false;
+  const scale = Math.min(w / vw, h / vh);
+  const dw = vw * scale;
+  const dh = vh * scale;
+  const dx = x + (w - dw) / 2;
+  const dy = y + (h - dh) / 2;
+  ctx.save();
+  if (mirror) {
+    ctx.translate(dx + dw, dy);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, dw, dh);
+  } else {
+    ctx.drawImage(video, dx, dy, dw, dh);
+  }
+  ctx.restore();
+  return true;
+}
+
+// 캠이 꺼졌거나(또는 화면 공유 중이라 캠 프레임을 못 받는) 참가자 자리에 채우는 자리표시자.
+function drawCamOffPlaceholder(ctx, x, y, w, h) {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#3a3f4a";
+  const r = Math.min(w, h) * 0.16;
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + h / 2 - r * 0.3, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(x + w / 2, y + h / 2 + r * 1.5, r * 1.7, r * 1.1, 0, Math.PI, 0);
+  ctx.fill();
+}
+
+function drawParticipantTile(ctx, peerId, x, y, w, h) {
+  const isLocal = peerId === clientId;
+  const meta = isLocal ? myPresence : peerMeta.get(peerId);
+  const nickname = isLocal ? "나" : (meta && meta.nickname) || defaultLabel(peerId);
+  const camOn = meta ? meta.camOn !== false : false;
+  // 화면 공유 중인 사람(본인 제외)은 지금 이 순간 캠이 아니라 화면 트랙이 전송되고
+  // 있어서, 그 사람의 실시간 캠 프레임을 받을 방법이 아예 없다 — 캠 꺼짐과 동일하게 처리한다.
+  const remoteSharingNow = !isLocal && peerId === sharingPeerId;
+
+  let videoEl = null;
+  if (isLocal) {
+    // 로컬 본인 타일의 video는 화면 공유 중에도 항상 캠 그대로 유지된다(화면 공유 미리보기는
+    // 별도 엘리먼트를 쓰기 때문) — 그래서 본인은 공유 여부와 무관하게 항상 캠을 쓸 수 있다.
+    const tile = document.getElementById(videoTileId(clientId));
+    videoEl = tile ? tile.querySelector("video") : null;
+  } else if (!remoteSharingNow) {
+    const tile = document.getElementById(videoTileId(peerId));
+    videoEl = tile ? tile.querySelector("video") : null;
+  }
+
+  const drew = camOn && videoEl && !remoteSharingNow && drawVideoContain(ctx, videoEl, x, y, w, h, isLocal);
+  if (!drew) {
+    drawCamOffPlaceholder(ctx, x, y, w, h);
+  }
+
+  ctx.font = "13px -apple-system, BlinkMacSystemFont, sans-serif";
+  const labelPadding = 16;
+  const labelWidth = Math.min(w - 8, ctx.measureText(nickname).width + labelPadding);
+  const labelHeight = 24;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+  ctx.fillRect(x + 6, y + h - labelHeight - 6, labelWidth, labelHeight);
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(nickname, x + 6 + 8, y + h - labelHeight / 2 - 6, labelWidth - 16);
+}
+
+// 지금 이 순간 화면을 캔버스에 합성해서 이미지 파일로 다운로드한다 (요청자 로컬에만 저장됨).
+function capturePhoto() {
+  try {
+    const participantIds = [clientId, ...Array.from(peers.keys())];
+    const tileW = 320;
+    const tileH = 240;
+    const gap = 14;
+    const headerHeight = 76;
+    const cols = Math.max(1, Math.ceil(Math.sqrt(participantIds.length)));
+    const rows = Math.ceil(participantIds.length / cols);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = cols * tileW + gap * (cols + 1);
+    canvas.height = headerHeight + rows * tileH + gap * (rows + 1);
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = "#0f1115";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, "0")}.${String(now.getDate()).padStart(2, "0")}`;
+    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#eef0f3";
+    ctx.font = "bold 26px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(knownRoomName || roomName || "미팅", canvas.width / 2, 34);
+    ctx.fillStyle = "#9aa1ac";
+    ctx.font = "15px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(`${dateStr}  ${timeStr}`, canvas.width / 2, 58);
+
+    participantIds.forEach((peerId, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = gap + col * (tileW + gap);
+      const y = headerHeight + gap + row * (tileH + gap);
+      drawParticipantTile(ctx, peerId, x, y, tileW, tileH);
+    });
+
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        showToast("사진 저장에 실패했어요. 잠시 후 다시 시도해주세요.");
+        return;
+      }
+      downloadPhotoBlob(blob);
+    }, "image/png");
+  } catch (err) {
+    console.error("단체 사진 촬영 실패", err);
+    showToast("사진을 찍는 중 문제가 발생했어요.");
+  }
+}
+
+function downloadPhotoBlob(blob) {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+  const timeStr = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const safeRoomName = (knownRoomName || roomName || "미팅").replace(/[\\/:*?"<>|]/g, "_");
+  const filename = `${safeRoomName}_${dateStr}_${timeStr}.png`;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast("사진이 저장됐어요!");
 }
 
 // ---- 참가자 목록 ----
@@ -1930,6 +2207,23 @@ async function init() {
     })
     .on("broadcast", { event: "signal" }, ({ payload }) => {
       if (payload.to === clientId) handleSignal(payload);
+    })
+    .on("broadcast", { event: "photo-request" }, ({ payload }) => {
+      if (payload.from !== clientId) showPhotoConsentPrompt(payload.from);
+    })
+    .on("broadcast", { event: "photo-consent" }, ({ payload }) => {
+      if (payload.to === clientId) handlePhotoConsentResponse(payload.from, payload.agree);
+    })
+    .on("broadcast", { event: "photo-cancelled" }, ({ payload }) => {
+      hidePhotoConsentPrompt();
+      hidePhotoCountdown();
+      if (photoRequestState && photoRequestState.initiatorId !== clientId) {
+        photoRequestState = null;
+      }
+      if (payload.from !== clientId) showToast("단체 사진 촬영이 취소됐어요.");
+    })
+    .on("broadcast", { event: "photo-countdown" }, ({ payload }) => {
+      if (payload.from !== clientId) beginPhotoCountdown(false);
     })
     .subscribe(async (status) => {
       if (status !== "SUBSCRIBED") return;

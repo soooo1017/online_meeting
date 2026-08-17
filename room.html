@@ -107,6 +107,7 @@
         <div id="reaction-picker" class="reaction-picker"></div>
         <button class="icon-btn" id="btn-reaction" title="리액션">😊</button>
       </div>
+      <button class="icon-btn" id="btn-take-photo" title="사진찍기">📸</button>
       <button class="icon-btn" id="btn-toggle-participants" title="참가자 목록">
         👥
         <span id="participants-count" class="chat-badge">1</span>
@@ -120,6 +121,23 @@
 
     <div id="toast" class="toast" role="status"></div>
     <div id="chat-toast-stack" class="chat-toast-stack" aria-live="polite"></div>
+
+    <!-- 단체 사진 찍기: 동의 요청 창 -->
+    <div id="photo-consent-modal" class="photo-consent-modal hidden">
+      <div class="photo-consent-box">
+        <p id="photo-consent-text"></p>
+        <div class="photo-consent-actions">
+          <button type="button" class="btn btn-text" id="btn-photo-consent-no">거절</button>
+          <button type="button" class="btn btn-primary" id="btn-photo-consent-yes">동의</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 단체 사진 찍기: 3-2-1 카운트다운 -->
+    <div id="photo-countdown-overlay" class="photo-countdown-overlay hidden">
+      <span id="photo-countdown-number"></span>
+    </div>
+    <div id="photo-flash" class="photo-flash"></div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
