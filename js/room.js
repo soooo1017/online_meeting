@@ -390,6 +390,9 @@ const el = {
   soundMasterToggle: document.getElementById("sound-master-toggle"),
   soundSettingsList: document.getElementById("sound-settings-list"),
   btnTakePhoto: document.getElementById("btn-take-photo"),
+  photoStatusBanner: document.getElementById("photo-status-banner"),
+  photoStatusText: document.getElementById("photo-status-text"),
+  btnPhotoStatusCancel: document.getElementById("btn-photo-status-cancel"),
   photoConsentModal: document.getElementById("photo-consent-modal"),
   photoConsentText: document.getElementById("photo-consent-text"),
   btnPhotoConsentYes: document.getElementById("btn-photo-consent-yes"),
@@ -1210,6 +1213,7 @@ function setupControls() {
   el.btnTakePhoto.addEventListener("click", startPhotoRequest);
   el.btnPhotoConsentYes.addEventListener("click", () => respondToPhotoConsent(true));
   el.btnPhotoConsentNo.addEventListener("click", () => respondToPhotoConsent(false));
+  el.btnPhotoStatusCancel.addEventListener("click", () => cancelPhotoRequest("촬영을 취소했어요."));
 
   buildSoundSettings();
   el.btnSoundSettings.addEventListener("click", (e) => {
@@ -1382,7 +1386,22 @@ function startPhotoRequest() {
   };
   el.btnTakePhoto.disabled = true;
   showToast("참가자들에게 단체 사진 동의를 요청했어요...");
+  showPhotoStatus(photoStatusLabel(0, others.length));
   channel.send({ type: "broadcast", event: "photo-request", payload: { from: clientId } });
+}
+
+// 발신자 쪽에서만 보이는 진행 상황 배너 문구 — "N명 중 M명 동의"
+function photoStatusLabel(agreedCount, totalCount) {
+  return `참가자 ${totalCount}명 중 ${agreedCount}명 동의`;
+}
+
+function showPhotoStatus(text) {
+  el.photoStatusText.textContent = text;
+  el.photoStatusBanner.classList.remove("hidden");
+}
+
+function hidePhotoStatus() {
+  el.photoStatusBanner.classList.add("hidden");
 }
 
 // 요청을 취소한다 — 이 함수를 호출한 쪽이 발신자(본인)일 때만 다른 사람들에게도 취소를 알린다.
@@ -1394,6 +1413,7 @@ function cancelPhotoRequest(reasonForInitiator) {
   el.btnTakePhoto.disabled = false;
   hidePhotoConsentPrompt();
   hidePhotoCountdown();
+  hidePhotoStatus();
   if (wasInitiator) {
     channel.send({ type: "broadcast", event: "photo-cancelled", payload: { from: clientId } });
     if (reasonForInitiator) showToast(reasonForInitiator);
@@ -1433,7 +1453,11 @@ function handlePhotoConsentResponse(fromId, agree) {
     return;
   }
 
-  const everyoneAgreed = Array.from(photoRequestState.consents.values()).every((v) => v === true);
+  const consentValues = Array.from(photoRequestState.consents.values());
+  const agreedCount = consentValues.filter((v) => v === true).length;
+  showPhotoStatus(photoStatusLabel(agreedCount, consentValues.length));
+
+  const everyoneAgreed = consentValues.every((v) => v === true);
   if (everyoneAgreed) {
     clearTimeout(photoRequestState.timeoutId);
     channel.send({ type: "broadcast", event: "photo-countdown", payload: { from: clientId } });
@@ -1445,6 +1469,7 @@ function handlePhotoConsentResponse(fromId, agree) {
 // 나머지는 화면에 3-2-1을 같이 보여주기만 한다(찍히는 사람들이 준비할 수 있도록).
 function beginPhotoCountdown(isInitiator) {
   hidePhotoConsentPrompt();
+  hidePhotoStatus();
   let n = PHOTO_COUNTDOWN_SECONDS;
   el.photoCountdownOverlay.classList.remove("hidden");
   el.photoCountdownNumber.textContent = String(n);

@@ -1182,6 +1182,33 @@ input[type="text"]:focus {
 
 /* ---------- 단체 사진 찍기 ---------- */
 
+.photo-status-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 90px;
+  transform: translateX(-50%);
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 10px 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 0.9rem;
+  color: var(--text);
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.photo-status-banner span {
+  white-space: nowrap;
+}
+
+.photo-status-banner .copy-btn {
+  flex-shrink: 0;
+}
+
 .photo-consent-modal {
   position: fixed;
   inset: 0;

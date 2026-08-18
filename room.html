@@ -122,6 +122,12 @@
     <div id="toast" class="toast" role="status"></div>
     <div id="chat-toast-stack" class="chat-toast-stack" aria-live="polite"></div>
 
+    <!-- 단체 사진 찍기: 요청자 쪽에서 보는 진행 상황(몇 명 중 몇 명 동의했는지) -->
+    <div id="photo-status-banner" class="photo-status-banner hidden">
+      <span id="photo-status-text"></span>
+      <button type="button" class="copy-btn" id="btn-photo-status-cancel">취소</button>
+    </div>
+
     <!-- 단체 사진 찍기: 동의 요청 창 -->
     <div id="photo-consent-modal" class="photo-consent-modal hidden">
       <div class="photo-consent-box">
